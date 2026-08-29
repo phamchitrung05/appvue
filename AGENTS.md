@@ -205,6 +205,12 @@ protected function isAccessible(User $user, ?string $path = null): bool
 
 === project session notes (đồng bộ giữa các máy qua git) ===
 
+# Quy tắc bắt buộc khi viết code
+
+- **Mọi comment / PHPDoc trong code phải viết bằng TIẾNG VIỆT**, mô tả chi tiết chức năng của class, method, tham số và giá trị trả về — áp dụng cho cả file mới lẫn khi sửa code cũ. Message API trả về cho người dùng cũng dùng tiếng Việt (tập trung ở `config/messages.php`).
+- Controller không hard-code chuỗi message; luôn trả response qua `BaseResponseService` (envelope `{success, status, code, message, data}`), message mặc định đọc từ `config/messages.php`.
+- **Response lỗi phải kèm trường `code`** — mã lỗi ổn định viết HOA (vd: `VALIDATION_FAILED`, `PRODUCT_NOT_FOUND`, `UNAUTHENTICATED`) để frontend báo lại, backend tra tức thì. Mã mặc định theo HTTP status nằm ở `messages.codes.by_status`; mã theo tài nguyên ở `messages.codes.crud`. Khi thêm loại lỗi mới, khai báo code trong config trước rồi mới dùng.
+
 # Ghi chú phiên làm việc — cập nhật sau mỗi buổi code quan trọng
 
 Ngôn ngữ làm việc với user: **tiếng Việt**.
@@ -220,7 +226,9 @@ Ngôn ngữ làm việc với user: **tiếng Việt**.
 
 ## Trạng thái máy đã làm việc (Windows, project tại `D:\Ai\appvue`)
 - Đã clone `https://github.com/phamchitrung05/appvue`, đã chạy `composer install` + `npm install` thành công (Laravel 12.36.1, Vite 7.1.12).
-- Chưa có file `.env`, chưa chạy migrate.
+- Đã dựng `.env` (sqlite), chạy migrate, có data test trong bảng products.
+- **Ngôn ngữ UI mặc định: TIẾNG VIỆT** — locale `vi` khai ở `themeConfig.js` (defaultLocale + langConfig), bản dịch menu/Vuetify ở `resources/js/plugins/i18n/locales/vi.json`; các chuỗi UI cứng trên trang làm việc phải viết tiếng Việt. Cookie `vuexy-language` ghi đè mặc định (người dùng đã chọn ngôn ngữ thì ưu tiên cookie).
+- Frontend chạy: SPA được Laravel serve tại `/admin/*` (blade `application.blade.php`); Vite dev có proxy `/api` → `127.0.0.1:8000`.
 
 ## Checklist khi sang máy mới
 1. Clone/pull repo `https://github.com/phamchitrung05/appvue`
