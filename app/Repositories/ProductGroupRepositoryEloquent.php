@@ -25,6 +25,18 @@ class ProductGroupRepositoryEloquent extends BaseRepository implements ProductGr
     ];
 
     /**
+     * Danh sách cột được phép sắp xếp qua tham số `sortBy` của frontend
+     * (đọc bởi DataTableCriteria — cột lạ sẽ bị bỏ qua thay vì lỗi SQL).
+     *
+     * @var array
+     */
+    public $fieldSortable = [
+        'name',
+        'sort_order',
+        'is_active',
+    ];
+
+    /**
      * Khai báo class Model mà repository này quản lý.
      *
      * @return string

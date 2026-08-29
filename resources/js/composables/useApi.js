@@ -18,7 +18,19 @@ export const useApi = createFetch({
           Authorization: `Bearer ${accessToken}`,
         }
       }
-      
+
+      // Tự serialize body object thành JSON + gắn Content-Type: body truyền
+      // qua fetchOptions KHÔNG được @vueuse tự stringify (cơ chế đó chỉ áp
+      // cho chuỗi .post(payload)), và Content-Type tự sinh cũng bị đè bởi
+      // base headers — Laravel sẽ đọc không ra JSON và validate thiếu trường.
+      if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+        options.body = JSON.stringify(options.body)
+        options.headers = {
+          ...options.headers,
+          'Content-Type': 'application/json',
+        }
+      }
+
       return { options }
     },
     afterFetch(ctx) {

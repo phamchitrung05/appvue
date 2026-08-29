@@ -44,8 +44,14 @@ class DataTableCriteria extends RequestCriteria
      */
     public function apply($model, RepositoryInterface $repository)
     {
+        // Luôn đọc request HIỆN TẠI: repository/controller có thể được tái sử
+        // dụng giữa các request trong cùng một process (route cache controller
+        // trong feature test, Octane...), khiến request inject lúc construct
+        // trở thành request cũ — sort/lọc sẽ nhận tham số của request trước.
+        $this->request = app(Request::class);
+
         $this->mapSearchParam();
-        $this->mapSortParams();
+        $this->mapSortParams($repository);
 
         $model = parent::apply($model, $repository);
 
@@ -123,14 +129,27 @@ class DataTableCriteria extends RequestCriteria
      *
      * Chiều sắp xếp được chuẩn hoá về chữ thường và chỉ chấp nhận `asc` hoặc
      * `desc`; giá trị lạ sẽ mặc định thành `asc`.
+     *
+     * Cột sắp xếp phải nằm trong whitelist của repository (`$fieldSortable`,
+     * fallback về `$fieldSearchable`) — RequestCriteria của l5-repository đẩy
+     * thẳng cột vào ORDER BY nên cột lạ sẽ gây lỗi SQL; ở đây loại bỏ tham số
+     * thay vì để truy vấn hỏng.
      */
-    protected function mapSortParams(): void
+    protected function mapSortParams(RepositoryInterface $repository): void
     {
         $direction = strtolower((string) $this->request->query('orderBy'));
         $isValidDirection = in_array($direction, ['asc', 'desc'], true);
 
         if ($this->request->filled('sortBy')) {
-            $this->request->query->set('orderBy', (string) $this->request->query('sortBy'));
+            $sortColumn = (string) $this->request->query('sortBy');
+
+            if (! $this->isSortableColumn($repository, $sortColumn)) {
+                $this->request->query->remove('orderBy');
+
+                return;
+            }
+
+            $this->request->query->set('orderBy', $sortColumn);
             $this->request->query->set('sortedBy', $isValidDirection ? $direction : 'asc');
 
             return;
@@ -139,5 +158,21 @@ class DataTableCriteria extends RequestCriteria
         if ($isValidDirection) {
             $this->request->query->remove('orderBy');
         }
+    }
+
+    /**
+     * Kiểm tra cột sắp xếp có được repository cho phép hay không.
+     *
+     * Ưu tiên thuộc tính `$fieldSortable` của repository nếu có — cho phép
+     * sắp xếp theo cột không nằm trong danh sách tìm kiếm/lọc (vd `price`);
+     * ngược lại rơi về các cột khai báo trong `$fieldSearchable`.
+     */
+    protected function isSortableColumn(RepositoryInterface $repository, string $column): bool
+    {
+        $sortable = property_exists($repository, 'fieldSortable')
+            ? (array) $repository->fieldSortable
+            : array_keys((array) $repository->getFieldsSearchable());
+
+        return in_array($column, $sortable, true);
     }
 }

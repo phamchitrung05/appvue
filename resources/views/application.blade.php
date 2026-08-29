@@ -7,6 +7,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vuexy - Vuejs Admin Dashboard Template</title>
   <link rel="stylesheet" type="text/css" href="{{ asset('loader.css') }}" />
+
+  {{-- Font Be Vietnam Pro: hỗ trợ đầy đủ dấu tiếng Việt --}}
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&display=swap" />
+
   @vite(['resources/js/main.js'])
 </head>
 

@@ -396,11 +396,36 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?itemsPerPage=10&sortBy=name&orderBy=desc')
             ->assertOk()
-            ->assertJsonPath('products.0.name', 'Latte');
+            ->assertJsonPath('data.products.0.name', 'Latte');
 
         $this->getJson('/api/v1/products?itemsPerPage=10&sortBy=name&orderBy=asc')
             ->assertOk()
-            ->assertJsonPath('products.0.name', 'Bạc xỉu');
+            ->assertJsonPath('data.products.0.name', 'Bạc xỉu');
+    }
+
+    public function test_data_table_index_sorts_by_price(): void
+    {
+        $this->seedThreeProducts();
+
+        $this->getJson('/api/v1/products?itemsPerPage=10&sortBy=price&orderBy=asc')
+            ->assertOk()
+            ->assertJsonPath('data.products.0.name', 'Bạc xỉu');
+
+        $this->getJson('/api/v1/products?itemsPerPage=10&sortBy=price&orderBy=desc')
+            ->assertOk()
+            ->assertJsonPath('data.products.0.name', 'Latte');
+    }
+
+    public function test_data_table_index_ignores_sort_by_unknown_column(): void
+    {
+        $this->seedThreeProducts();
+
+        // Cột không nằm trong $fieldSortable phải bị bỏ qua (vẫn 200 và đủ
+        // dữ liệu) thay vì đẩy thẳng vào ORDER BY gây lỗi SQL 500.
+        $this->getJson('/api/v1/products?itemsPerPage=10&sortBy=evil_column&orderBy=asc')
+            ->assertOk()
+            ->assertJsonCount(3, 'data.products')
+            ->assertJsonPath('data.total', 3);
     }
 
     public function test_data_table_index_returns_every_row_when_items_per_page_is_negative(): void

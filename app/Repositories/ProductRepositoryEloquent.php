@@ -26,6 +26,23 @@ class ProductRepositoryEloquent extends BaseRepository implements ProductReposit
     ];
 
     /**
+     * Danh sách cột được phép sắp xếp qua tham số `sortBy` của frontend.
+     *
+     * Tách riêng khỏi `$fieldSearchable` (tìm kiếm/lọc) để sort theo `price`
+     * mà không mở kèm việc tìm kiếm/lọc theo cột đó. DataTableCriteria đọc
+     * trực tiếp thuộc tính public này làm whitelist — cột lạ sẽ bị bỏ qua
+     * thay vì gây lỗi SQL.
+     *
+     * @var array
+     */
+    public $fieldSortable = [
+        'name',
+        'product_group_id',
+        'price',
+        'is_active',
+    ];
+
+    /**
      * Khai báo class Model mà repository này quản lý.
      *
      * @return string

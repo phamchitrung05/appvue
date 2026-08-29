@@ -1,6 +1,8 @@
 @use "sass:math";
 
-$font-family-custom: "Public Sans",sans-serif,-apple-system,blinkmacsystemfont,
+// Font chính của app: Be Vietnam Pro (tải qua Google Fonts ở application.blade.php)
+// — thiết kế riêng cho tiếng Việt, dấu hiển thị chuẩn; fallback giữ nguyên của template.
+$font-family-custom: "Be Vietnam Pro",sans-serif,-apple-system,blinkmacsystemfont,
   "Segoe UI",roboto,"Helvetica Neue",arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol";
 
 /* 👉 Typography custom variables */

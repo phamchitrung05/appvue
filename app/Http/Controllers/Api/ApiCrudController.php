@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Prettus\Repository\Contracts\RepositoryInterface;
-use Prettus\Repository\Criteria\RequestCriteria;
 
 /**
  * Base controller cho các API JSON CRUD vận hành trên l5-repository.
@@ -61,11 +60,14 @@ abstract class ApiCrudController extends Controller
     /**
      * Danh sách có phân trang: áp criteria (tìm kiếm/lọc/sắp xếp) rồi ủy thác
      * việc dựng response cho hook indexResponse().
+     *
+     * Repository đã tự push DataTableCriteria trong boot() — criteria này kế
+     * thừa RequestCriteria và BỔ SUNG whitelist cho sort + lọc, nên không push
+     * RequestCriteria gốc ở đây nữa (tránh áp 2 lần và tránh đường đi kiểu
+     * `?orderBy=<cột lạ>` vượt qua whitelist gây lỗi SQL).
      */
     public function index(Request $request): JsonResponse
     {
-        $this->repository->pushCriteria(app(RequestCriteria::class));
-
         $perPage = (int) $request->query('per_page', (string) config('repository.pagination.limit', 15));
 
         return $this->indexResponse($request, $this->repository->paginate($perPage));

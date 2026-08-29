@@ -1,7 +1,7 @@
 <script setup>
-// ⚠️ Widget thống kê phía trên vẫn là dữ liệu tĩnh của template —
-// chưa có endpoint thống kê thật ở backend nên tạm giữ nguyên.
 const widgetData = ref([
+  // ⚠️ Widget thống kê phía trên vẫn là dữ liệu tĩnh của template —
+  // chưa có endpoint thống kê thật ở backend nên tạm giữ nguyên.
   {
     title: 'Bán tại quầy',
     value: '$5,345',
@@ -31,21 +31,18 @@ const widgetData = ref([
   },
 ])
 
-// Các cột bảng khớp với trường THẬT của model Product trả về từ API:
-// name, product_group (qua product_group_id), price, is_active.
-// Các cột demo không có trong model (Stock, SKU, QTY) đã được bỏ.
-// Chỉ bật sortable cho cột có cột tương ứng trong DB (price) — sắp xếp
-// theo cột lạ sẽ gây lỗi SQL ở backend.
+// Các cột bảng dùng đúng tên trường THẬT trả về từ API (name, product_group_id,
+// price, is_active) — key TRÙNG tên cột DB để sortBy gửi lên backend áp thẳng
+// vào ORDER BY mà không cần ánh xạ thêm. Cột actions chỉ chứa nút nên không sort;
+// cột lạ gửi tay lên sẽ bị backend chặn qua $fieldSortable của ProductRepository.
 const headers = [
   {
     title: 'Sản phẩm',
-    key: 'product',
-    sortable: false,
+    key: 'name',
   },
   {
     title: 'Nhóm hàng',
-    key: 'category',
-    sortable: false,
+    key: 'product_group_id',
   },
   {
     title: 'Giá',
@@ -53,8 +50,7 @@ const headers = [
   },
   {
     title: 'Trạng thái',
-    key: 'status',
-    sortable: false,
+    key: 'is_active',
   },
   {
     title: 'Thao tác',
@@ -69,6 +65,10 @@ const headers = [
 const selectedStatus = ref()
 const selectedCategory = ref()
 const searchQuery = ref('')
+
+// Debounce 500ms: useApi có refetch:true nên mỗi lần query đổi là một request —
+// phải debounce ở nguồn để không gọi /v1/products cho từng ký tự người dùng gõ.
+const debouncedSearchQuery = refDebounced(searchQuery, 500)
 const selectedRows = ref([])
 
 // Tuỳ chọn phân trang của VDataTableServer
@@ -100,6 +100,7 @@ const status = ref([
 // đã bóc envelope thì mảng bản ghi nằm ở thuộc tính `data`.
 const {
   data: groupsData,
+  execute: fetchGroups,
 } = await useApi(createUrl('/v1/product-groups', {
   query: { per_page: 100 },
 }))
@@ -108,6 +109,11 @@ const {
 const categories = computed(() =>
   (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
 )
+
+// Nhóm mới vừa tạo qua dialog: tải lại options để nhóm xuất hiện trong bộ lọc
+const onGroupCreated = async () => {
+  await fetchGroups()
+}
 
 // Map product_group_id -> tên nhóm để hiển thị cột Category
 const groupName = groupId =>
@@ -135,8 +141,8 @@ const productsQuery = computed(() => {
     orderBy: orderBy.value,
   }
 
-  if (searchQuery.value)
-    query.q = searchQuery.value
+  if (debouncedSearchQuery.value)
+    query.q = debouncedSearchQuery.value
 
   if (selectedCategory.value !== null && selectedCategory.value !== undefined)
     query.product_group_id = selectedCategory.value
@@ -145,6 +151,13 @@ const productsQuery = computed(() => {
     query.is_active = selectedStatus.value
 
   return query
+})
+
+// Từ khoá mới luôn quay về trang 1. Watch phải đặt TRƯỚC useApi để watcher
+// refetch của useApi chạy sau và đọc giá trị page đã cập nhật — nếu không sẽ
+// gọi API hai lần (một lần với page cũ, một lần với page 1).
+watch(debouncedSearchQuery, () => {
+  page.value = 1
 })
 
 // Endpoint thật của Laravel: GET /api/v1/products
@@ -273,18 +286,22 @@ const deleteProduct = async id => {
             />
           </VCol>
 
-          <!-- 👉 Lọc theo nhóm sản phẩm (product_group_id) -->
+          <!-- 👉 Lọc theo nhóm sản phẩm (product_group_id) + nút thêm nhanh nhóm -->
           <VCol
             cols="12"
             sm="6"
           >
-            <AppSelect
-              v-model="selectedCategory"
-              placeholder="Category"
-              :items="categories"
-              clearable
-              clear-icon="tabler-x"
-            />
+            <div class="d-flex align-center gap-x-4">
+              <AppSelect
+                v-model="selectedCategory"
+                placeholder="Category"
+                :items="categories"
+                clearable
+                clear-icon="tabler-x"
+                class="flex-grow-1"
+              />
+              <ProductGroupCreateDialog @created="onGroupCreated" />
+            </div>
           </VCol>
         </VRow>
       </VCardText>
@@ -342,7 +359,7 @@ const deleteProduct = async id => {
         @update:options="updateOptions"
       >
         <!-- Sản phẩm: ảnh + tên từ các trường thật image_url / name -->
-        <template #item.product="{ item }">
+        <template #item.name="{ item }">
           <div class="d-flex align-center gap-x-4">
             <VAvatar
               v-if="item.image_url"
@@ -356,7 +373,7 @@ const deleteProduct = async id => {
         </template>
 
         <!-- Nhóm sản phẩm: map product_group_id sang tên nhóm -->
-        <template #item.category="{ item }">
+        <template #item.product_group_id="{ item }">
           <span class="text-body-1 text-high-emphasis">{{ groupName(item.product_group_id) }}</span>
         </template>
 
@@ -366,7 +383,7 @@ const deleteProduct = async id => {
         </template>
 
         <!-- Trạng thái: chip dựa trên is_active -->
-        <template #item.status="{ item }">
+        <template #item.is_active="{ item }">
           <VChip
             v-bind="resolveStatus(item.is_active)"
             density="default"

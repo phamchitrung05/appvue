@@ -1,62 +1,119 @@
 <script setup>
-import { ref } from 'vue'
+import { validationMessages } from '@/utils/validationMessages'
 
-const optionCounter = ref(1)
-const activeTab = ref('Restock')
-const isTaxChargeToProduct = ref(true)
+const form = ref({
+  // Các field khớp 1-1 với createRules() của ProductsController:
+  // name (bắt buộc, ≤255), price (bắt buộc, số, ≥0), description,
+  // product_group_id, is_active, image_url (các trường tuỳ chọn).
+  name: '',
+  description: '',
+  price: null,
+  product_group_id: null,
+  is_active: true,
+  image_url: '',
+})
 
-const shippingList = [
-  {
-    desc: 'You\'ll be responsible for product delivery.Any damage or delay during shipping may cost you a Damage fee',
-    title: 'Fulfilled by Seller',
-    value: 'Fulfilled by Seller',
-  },
-  {
-    desc: 'Your product, Our responsibility.For a measly fee, we will handle the delivery process for you.',
-    title: 'Fulfilled by Company name',
-    value: 'Fulfilled by Company name',
-  },
+const formRef = ref()
+const isSubmitting = ref(false)
+const snackbar = ref({ show: false, message: '', color: 'error' })
+
+const router = useRouter()
+const route = useRoute()
+
+// Quy tắc validate phía client khớp createRules() của backend —
+// server vẫn validate lại, đây chỉ là lớp chặn sớm cho UX.
+const nameRules = [
+  value => !!value?.trim() || validationMessages.product.nameRequired,
+  value => (value?.trim().length || 0) <= 255 || validationMessages.product.nameMax,
 ]
 
-const shippingType = ref('Fulfilled by Company name')
-const deliveryType = ref('Worldwide delivery')
-
-const selectedAttrs = ref([
-  'Biodegradable',
-  'Expiry Date',
-])
-
-const inventoryTabsData = [
-  {
-    icon: 'tabler-cube',
-    title: 'Restock',
-    value: 'Restock',
-  },
-  {
-    icon: 'tabler-car',
-    title: 'Shipping',
-    value: 'Shipping',
-  },
-  {
-    icon: 'tabler-map-pin',
-    title: 'Global Delivery',
-    value: 'Global Delivery',
-  },
-  {
-    icon: 'tabler-world',
-    title: 'Attributes',
-    value: 'Attributes',
-  },
-  {
-    icon: 'tabler-lock',
-    title: 'Advanced',
-    value: 'Advanced',
-  },
+const priceRules = [
+  value => value !== null && value !== undefined && value !== '' || validationMessages.product.priceRequired,
+  value => !Number.isNaN(Number(value)) || validationMessages.product.priceNumeric,
+  value => Number(value) >= 0 || validationMessages.product.priceMin,
 ]
 
-const content = ref(`<p>
-    Keep your account secure with authentication step.
-    </p>`)
+// ==================== Danh sách nhóm sản phẩm ====================
+// Endpoint thật /v1/product-groups: sau khi useApi bóc envelope, mảng bản
+// ghi nằm ở thuộc tính `data`. Biến thành options { title, value: id }.
+const { data: groupsData, execute: refreshGroups } = await useApi(createUrl('/v1/product-groups', {
+  query: { per_page: 100 },
+}))
+
+const productGroups = computed(() =>
+  (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
+)
+
+// Chọn nhóm ban đầu: ưu tiên nhóm truyền từ trang danh mục (?group=<id> —
+// khi bấm "Thêm mới" trong một nhóm); không hợp lệ thì chọn nhóm đầu tiên.
+const requestedGroupId = Number(route.query.group)
+const hasRequestedGroup = productGroups.value.some(group => group.value === requestedGroupId)
+
+form.value.product_group_id = hasRequestedGroup ? requestedGroupId : productGroups.value[0]?.value ?? null
+
+// Nhóm mới vừa tạo qua dialog: tải lại options và tự chọn nhóm đó luôn
+const onGroupCreated = async group => {
+  await refreshGroups()
+  form.value.product_group_id = group?.id ?? form.value.product_group_id
+}
+
+// ==================== Gửi form ====================
+// Dựng payload khớp createRules(): trường rỗng gửi null thay vì chuỗi rỗng,
+// price ép về số. Tạo thành công (2xx) quay về trang danh sách.
+const buildPayload = () => ({
+  name: form.value.name.trim(),
+  description: form.value.description || null,
+  price: form.value.price === null || form.value.price === '' ? null : Number(form.value.price),
+  product_group_id: form.value.product_group_id ?? null,
+  is_active: form.value.is_active,
+  image_url: form.value.image_url?.trim() || null,
+})
+
+const showSnackbar = (message, color = 'error') => {
+  snackbar.value = { show: true, message, color }
+}
+
+const submitProduct = async () => {
+  const { valid } = await formRef.value.validate()
+
+  if (!valid)
+    return
+
+  isSubmitting.value = true
+
+  // useApi bóc envelope nên response thành công nằm ở `data`; lỗi (4xx/5xx)
+  // nằm ở `error` dạng text — parse ra để lấy message tiếng Việt từ config.
+  const { error, statusCode } = await useApi('/v1/products', {
+    method: 'POST',
+    body: buildPayload(),
+  }).json()
+
+  isSubmitting.value = false
+
+  // useApi trả về các REF (giống productsData.value ở trang list) nên phải
+  // đọc .value — so sánh trực tiếp statusCode sẽ luôn false.
+  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
+
+  if (isOk) {
+    router.push('/apps/ecommerce/product/list')
+
+    return
+  }
+
+  let message = validationMessages.product.createFailed
+
+  try {
+    const body = JSON.parse(error.value)
+
+    if (body?.message)
+      message = body.message
+  }
+  catch {
+    // error không phải JSON (lỗi mạng...) — giữ message mặc định
+  }
+
+  showSnackbar(message)
+}
 </script>
 
 <template>
@@ -64,10 +121,10 @@ const content = ref(`<p>
     <div class="d-flex flex-wrap justify-start justify-sm-space-between gap-y-4 gap-x-6 mb-6">
       <div class="d-flex flex-column justify-center">
         <h4 class="text-h4 font-weight-medium">
-          Add a new product
+          Thêm sản phẩm mới
         </h4>
         <div class="text-body-1">
-          Orders placed across your store
+          Nhập thông tin sản phẩm bán tại quầy và trên website
         </div>
       </div>
 
@@ -75,483 +132,145 @@ const content = ref(`<p>
         <VBtn
           variant="tonal"
           color="secondary"
+          :disabled="isSubmitting"
+          @click="$router.push('/apps/ecommerce/product/list')"
         >
-          Discard
+          Hủy bỏ
         </VBtn>
         <VBtn
-          variant="tonal"
-          color="primary"
+          :loading="isSubmitting"
+          @click="submitProduct"
         >
-          Save Draft
+          Thêm sản phẩm
         </VBtn>
-        <VBtn>Publish Product</VBtn>
       </div>
     </div>
 
-    <VRow>
-      <VCol md="8">
-        <!-- 👉 Product Information -->
-        <VCard
-          class="mb-6"
-          title="Product Information"
+    <VForm
+      ref="formRef"
+      @submit.prevent="submitProduct"
+    >
+      <VRow>
+        <VCol
+          md="8"
+          cols="12"
         >
-          <VCardText>
-            <VRow>
-              <VCol cols="12">
-                <AppTextField
-                  label="Name"
-                  placeholder="iPhone 14"
-                />
-              </VCol>
-              <VCol
-                cols="12"
-                md="6"
-              >
-                <AppTextField
-                  label="SKU"
-                  placeholder="FXSK123U"
-                />
-              </VCol>
-              <VCol
-                cols="12"
-                md="6"
-              >
-                <AppTextField
-                  label="Barcode"
-                  placeholder="0123-4567"
-                />
-              </VCol>
-              <VCol>
-                <span class="mb-1">Description (optional)</span>
-                <ProductDescriptionEditor
-                  v-model="content"
-                  placeholder="Product Description"
-                  class="border rounded"
-                />
-              </VCol>
-            </VRow>
-          </VCardText>
-        </VCard>
-
-        <!-- 👉 Media -->
-        <VCard class="mb-6">
-          <VCardItem>
-            <template #title>
-              Product Image
-            </template>
-            <template #append>
-              <span class="text-primary font-weight-medium text-sm cursor-pointer">Add Media from URL</span>
-            </template>
-          </VCardItem>
-
-          <VCardText>
-            <DropZone />
-          </VCardText>
-        </VCard>
-
-        <!-- 👉 Variants -->
-        <VCard
-          title="Variants"
-          class="mb-6"
-        >
-          <VCardText>
-            <template
-              v-for="i in optionCounter"
-              :key="i"
-            >
+          <!-- 👉 Thông tin sản phẩm -->
+          <VCard
+            class="mb-6"
+            title="Thông tin sản phẩm"
+          >
+            <VCardText>
               <VRow>
-                <VCol
-                  cols="12"
-                  md="4"
-                >
-                  <AppSelect
-                    :items="['Size', 'Color', 'Weight']"
-                    placeholder="Select Variant"
-                    label="Options"
-                  />
-                </VCol>
-                <VCol
-                  cols="12"
-                  md="8"
-                  class="d-flex align-self-end"
-                >
+                <VCol cols="12">
                   <AppTextField
-                    placeholder="38"
-                    type="number"
+                    v-model="form.name"
+                    label="Tên sản phẩm"
+                    placeholder="Cà phê sữa đá"
+                    :rules="nameRules"
                   />
                 </VCol>
               </VRow>
-            </template>
+            </VCardText>
+          </VCard>
 
-            <VBtn
-              class="mt-6"
-              prepend-icon="tabler-plus"
-              @click="optionCounter++"
-            >
-              Add another option
-            </VBtn>
-          </VCardText>
-        </VCard>
-
-        <!-- 👉 Inventory -->
-        <VCard
-          title="Inventory"
-          class="inventory-card"
-        >
-          <VCardText>
-            <VRow>
-              <VCol
-                cols="12"
-                md="4"
-              >
-                <div class="pe-3">
-                  <VTabs
-                    v-model="activeTab"
-                    direction="vertical"
-                    color="primary"
-                    class="v-tabs-pill"
-                  >
-                    <VTab
-                      v-for="(tab, index) in inventoryTabsData"
-                      :key="index"
-                      :value="tab.value"
-                    >
-                      <VIcon
-                        :icon="tab.icon"
-                        class="me-2"
-                      />
-                      <div class="text-truncate font-weight-medium text-start">
-                        {{ tab.title }}
-                      </div>
-                    </VTab>
-                  </VTabs>
-                </div>
-              </VCol>
-
-              <VDivider :vertical="!$vuetify.display.smAndDown" />
-
-              <VCol
-                cols="12"
-                md="8"
-              >
-                <VWindow
-                  v-model="activeTab"
-                  class="w-100"
-                  :touch="false"
-                >
-                  <VWindowItem value="Restock">
-                    <div class="d-flex flex-column gap-y-4 ps-3">
-                      <p class="mb-0">
-                        Options
-                      </p>
-
-                      <div class="d-flex gap-x-4 align-center">
-                        <AppTextField
-                          label="Add to Stock"
-                          placeholder="Quantity"
-                        />
-                        <VBtn class="align-self-end">
-                          Confirm
-                        </VBtn>
-                      </div>
-
-                      <div>
-                        <div class="text-base text-high-emphasis pb-2">
-                          Product in stock now: 54
-                        </div>
-                        <div class="text-base text-high-emphasis pb-2">
-                          Product in transit: 390
-                        </div>
-                        <div class="text-base text-high-emphasis pb-2">
-                          Last time restocked: 24th June, 2022
-                        </div>
-                        <div class="text-base text-high-emphasis pb-2">
-                          Total stock over lifetime: 2,430
-                        </div>
-                      </div>
-                    </div>
-                  </VWindowItem>
-
-                  <VWindowItem value="Shipping">
-                    <VRadioGroup
-                      v-model="shippingType"
-                      label="Shipping Type"
-                      class="ms-3"
-                    >
-                      <VRadio
-                        v-for="item in shippingList"
-                        :key="item.value"
-                        :value="item.value"
-                        class="mb-4"
-                      >
-                        <template #label>
-                          <div>
-                            <div class="text-high-emphasis font-weight-medium mb-1">
-                              {{ item.title }}
-                            </div>
-                            <div class="text-sm">
-                              {{ item.desc }}
-                            </div>
-                          </div>
-                        </template>
-                      </VRadio>
-                    </VRadioGroup>
-                  </VWindowItem>
-
-                  <VWindowItem value="Global Delivery">
-                    <div class="ps-3">
-                      <h5 class="text-h5 mb-6">
-                        Global Delivery
-                      </h5>
-
-                      <VRadioGroup
-                        v-model="deliveryType"
-                        label="Global Delivery"
-                      >
-                        <VRadio
-                          value="Worldwide delivery"
-                          class="mb-4"
-                        >
-                          <template #label>
-                            <div>
-                              <div class="text-high-emphasis font-weight-medium mb-1">
-                                Worldwide delivery
-                              </div>
-                              <div class="text-sm">
-                                Only available with Shipping method:
-                                <span class="text-primary">
-                                  Fulfilled by Company name
-                                </span>
-                              </div>
-                            </div>
-                          </template>
-                        </VRadio>
-
-                        <VRadio
-                          value="Selected Countries"
-                          class="mb-4"
-                        >
-                          <template #label>
-                            <div>
-                              <div class="text-high-emphasis font-weight-medium mb-1">
-                                Selected Countries
-                              </div>
-                              <VTextField
-                                placeholder="USA"
-                                style="min-inline-size: 200px;"
-                              />
-                            </div>
-                          </template>
-                        </VRadio>
-
-                        <VRadio>
-                          <template #label>
-                            <div>
-                              <div class="text-high-emphasis font-weight-medium mb-1">
-                                Local delivery
-                              </div>
-                              <div class="text-sm">
-                                Deliver to your country of residence
-                                <span class="text-primary">
-                                  Change profile address
-                                </span>
-                              </div>
-                            </div>
-                          </template>
-                        </VRadio>
-                      </VRadioGroup>
-                    </div>
-                  </VWindowItem>
-
-                  <VWindowItem value="Attributes">
-                    <div class="ps-3">
-                      <div class="mb-6 text-h6">
-                        Attributes
-                      </div>
-                      <div class="d-flex flex-column gap-y-1">
-                        <VCheckbox
-                          v-model="selectedAttrs"
-                          label="Fragile Product"
-                          value="Fragile Product"
-                        />
-                        <VCheckbox
-                          v-model="selectedAttrs"
-                          value="Biodegradable"
-                          label="Biodegradable"
-                        />
-                        <VCheckbox
-                          v-model="selectedAttrs"
-                          value="Frozen Product"
-                        >
-                          <template #label>
-                            <div class="d-flex flex-column mb-1">
-                              <div>Frozen Product</div>
-                              <VTextField
-                                placeholder="40 C"
-                                type="number"
-                              />
-                            </div>
-                          </template>
-                        </VCheckbox>
-                        <VCheckbox
-                          v-model="selectedAttrs"
-                          value="Expiry Date"
-                        >
-                          <template #label>
-                            <div class="d-flex flex-column mb-1">
-                              <div>Expiry Date of Product</div>
-                              <AppDateTimePicker
-                                model-value="2025-06-14"
-                                placeholder="Select a Date"
-                              />
-                            </div>
-                          </template>
-                        </VCheckbox>
-                      </div>
-                    </div>
-                  </VWindowItem>
-
-                  <VWindowItem value="Advanced">
-                    <div class="ps-3">
-                      <h5 class="text-h5 mb-6">
-                        Advanced
-                      </h5>
-                      <div class="d-flex flex-sm-row flex-column flex-wrap justify-space-between gap-x-6 gap-y-4">
-                        <AppSelect
-                          label="Product ID Type"
-                          placeholder="Select Product Type"
-                          :items="['ISBN', 'UPC', 'EAN', 'JAN']"
-                        />
-                        <AppTextField
-                          label="Product Id"
-                          placeholder="100023"
-                        />
-                      </div>
-                    </div>
-                  </VWindowItem>
-                </VWindow>
-              </VCol>
-            </VRow>
-          </VCardText>
-        </VCard>
-      </VCol>
-
-      <VCol
-        md="4"
-        cols="12"
-      >
-        <!-- 👉 Pricing -->
-        <VCard
-          title="Pricing"
-          class="mb-6"
-        >
-          <VCardText>
-            <AppTextField
-              label="Best Price"
-              placeholder="Price"
-              class="mb-6"
-            />
-            <AppTextField
-              label="Discounted Price"
-              placeholder="$499"
-              class="mb-6"
-            />
-
-            <VCheckbox
-              v-model="isTaxChargeToProduct"
-              label="Charge Tax on this product"
-            />
-
-            <VDivider class="my-2" />
-
-            <div class="d-flex flex-raw align-center justify-space-between ">
-              <span>In stock</span>
-              <VSwitch density="compact" />
-            </div>
-          </VCardText>
-        </VCard>
-
-        <!-- 👉 Organize -->
-        <VCard title="Organize">
-          <VCardText>
-            <div class="d-flex flex-column gap-y-4">
-              <AppSelect
-                placeholder="Select Vendor"
-                label="Vendor"
-                :items="['Men\'s Clothing', 'Women\'s Clothing', 'Kid\'s Clothing']"
+          <!--
+            👉 Hình ảnh: model chỉ lưu đường dẫn (image_url) nên nhập URL,
+            chưa có endpoint upload file 
+          -->
+          <VCard
+            title="Hình ảnh"
+            class="mb-6"
+          >
+            <VCardText>
+              <AppTextField
+                v-model="form.image_url"
+                label="Đường dẫn hình ảnh (URL)"
+                placeholder="https://example.com/images/cafe-sua.jpg"
+                clearable
               />
-              <div>
-                <VLabel class="d-flex">
-                  <div class="d-flex text-sm justify-space-between w-100">
-                    <div class="text-high-emphasis">
-                      Category
-                    </div>
-                  </div>
-                </VLabel>
+              <div
+                v-if="form.image_url"
+                class="d-flex justify-center mt-4"
+              >
+                <VImg
+                  :src="form.image_url"
+                  max-width="320"
+                  max-height="220"
+                  class="rounded border"
+                  cover
+                />
+              </div>
+            </VCardText>
+          </VCard>
+        </VCol>
 
-                <div class="d-flex gap-x-4">
+        <VCol
+          md="4"
+          cols="12"
+        >
+          <!-- 👉 Giá -->
+          <VCard
+            title="Giá bán"
+            class="mb-6"
+          >
+            <VCardText>
+              <AppTextField
+                v-model="form.price"
+                label="Giá bán (VNĐ)"
+                placeholder="25000"
+                type="number"
+                min="0"
+                step="1000"
+                :rules="priceRules"
+                class="mb-6"
+              />
+
+              <VDivider class="my-2" />
+
+              <div class="d-flex align-center justify-space-between">
+                <span>Đang bán</span>
+                <VSwitch
+                  v-model="form.is_active"
+                  density="compact"
+                />
+              </div>
+            </VCardText>
+          </VCard>
+
+          <!-- 👉 Nhóm Sản Phẩm -->
+          <VCard title="Nhóm Sản Phẩm">
+            <VCardText>
+              <div class="d-flex flex-column gap-y-4">
+                <div class="d-flex align-center gap-x-4">
                   <AppSelect
-                    placeholder="Select Category"
-                    :items="['Household', 'Office', 'Electronics', 'Management', 'Automotive']"
+                    v-model="form.product_group_id"
+                    placeholder="Chọn nhóm hàng"
+                    :items="productGroups"
+                    clearable
+                    clear-icon="tabler-x"
+                    class="flex-grow-1"
                   />
-                  <VBtn
-                    rounded
-                    icon="tabler-plus"
-                    variant="tonal"
-                  />
+                  <ProductGroupCreateDialog @created="onGroupCreated" />
                 </div>
               </div>
-              <AppSelect
-                placeholder="Select Collection"
-                label="Collection"
-                :items="['Men\'s Clothing', 'Women\'s Clothing', 'Kid\'s Clothing']"
-              />
-              <AppSelect
-                placeholder="Select Status"
-                label="Status"
-                :items="['Published', 'Inactive', 'Scheduled']"
-              />
-              <AppTextField
-                label="Tags"
-                placeholder="Fashion, Trending, Summer"
-              />
-            </div>
-          </VCardText>
-        </VCard>
-      </VCol>
-    </VRow>
+            </VCardText>
+          </VCard>
+        </VCol>
+      </VRow>
+    </VForm>
+
+    <VSnackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      location="top"
+    >
+      {{ snackbar.message }}
+    </VSnackbar>
   </div>
 </template>
 
-<style lang="scss" scoped>
-  .drop-zone {
-    border: 2px dashed rgba(var(--v-theme-on-surface), 0.12);
-    border-radius: 6px;
-  }
-</style>
-
 <style lang="scss">
-.inventory-card {
-  .v-tabs.v-tabs-pill {
-    .v-slide-group-item--active.v-tab--selected.text-primary {
-      h6 {
-        color: #fff !important;
-      }
-    }
-  }
-
-  .v-radio-group,
-  .v-checkbox {
-    .v-selection-control {
-      align-items: start !important;
-    }
-
-    .v-label.custom-input {
-      border: none !important;
-    }
-  }
-}
-
 .ProseMirror {
   p {
     margin-block-end: 0;

@@ -51,7 +51,9 @@ module.exports = {
     'object-curly-spacing': ['error', 'always'],
 
     // Enforce camelCase naming convention
-    'camelcase': 'error',
+    // properties: 'never' — tên property phải giữ snake_case vì là tham số
+    // API của backend Laravel (per_page, product_group_id, is_active...)
+    'camelcase': ['error', { properties: 'never' }],
 
     // Disable max-len
     'max-len': 'off',
