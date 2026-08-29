@@ -65,3 +65,7 @@ public/mockServiceWorker.js
 # Env files
 .env*
 !.env.example
+
+# Tool config theo từng máy (đường dẫn tuyệt đối, không đồng bộ qua git)
+/.ai
+
