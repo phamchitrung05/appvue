@@ -1,131 +1,77 @@
 <script setup>
+// ⚠️ Widget thống kê phía trên vẫn là dữ liệu tĩnh của template —
+// chưa có endpoint thống kê thật ở backend nên tạm giữ nguyên.
 const widgetData = ref([
   {
-    title: 'In-Store Sales',
+    title: 'Bán tại quầy',
     value: '$5,345',
     icon: 'tabler-smart-home',
-    desc: '5k orders',
+    desc: '5k đơn hàng',
     change: 5.7,
   },
   {
-    title: 'Website Sales',
+    title: 'Bán qua website',
     value: '$674,347',
     icon: 'tabler-device-laptop',
-    desc: '21k orders',
+    desc: '21k đơn hàng',
     change: 12.4,
   },
   {
-    title: 'Discount',
+    title: 'Giảm giá',
     value: '$14,235',
     icon: 'tabler-gift',
-    desc: '6k orders',
+    desc: '6k đơn hàng',
   },
   {
-    title: 'Affiliate',
+    title: 'Tiếp thị liên kết',
     value: '$8,345',
     icon: 'tabler-wallet',
-    desc: '150 orders',
+    desc: '150 đơn hàng',
     change: -3.5,
   },
 ])
 
+// Các cột bảng khớp với trường THẬT của model Product trả về từ API:
+// name, product_group (qua product_group_id), price, is_active.
+// Các cột demo không có trong model (Stock, SKU, QTY) đã được bỏ.
+// Chỉ bật sortable cho cột có cột tương ứng trong DB (price) — sắp xếp
+// theo cột lạ sẽ gây lỗi SQL ở backend.
 const headers = [
   {
-    title: 'Product',
+    title: 'Sản phẩm',
     key: 'product',
-  },
-  {
-    title: 'Category',
-    key: 'category',
-  },
-  {
-    title: 'Stock',
-    key: 'stock',
     sortable: false,
   },
   {
-    title: 'SKU',
-    key: 'sku',
+    title: 'Nhóm hàng',
+    key: 'category',
+    sortable: false,
   },
   {
-    title: 'Price',
+    title: 'Giá',
     key: 'price',
   },
   {
-    title: 'QTY',
-    key: 'qty',
-  },
-  {
-    title: 'Status',
+    title: 'Trạng thái',
     key: 'status',
+    sortable: false,
   },
   {
-    title: 'Actions',
+    title: 'Thao tác',
     key: 'actions',
     sortable: false,
   },
 ]
 
+// ==================== Bộ lọc & phân trang ====================
+// selectedStatus: null | true | false — lọc theo cột is_active của DB.
+// selectedCategory: id của nhóm sản phẩm (product_group_id).
 const selectedStatus = ref()
 const selectedCategory = ref()
-const selectedStock = ref()
 const searchQuery = ref('')
 const selectedRows = ref([])
 
-const status = ref([
-  {
-    title: 'Scheduled',
-    value: 'Scheduled',
-  },
-  {
-    title: 'Publish',
-    value: 'Published',
-  },
-  {
-    title: 'Inactive',
-    value: 'Inactive',
-  },
-])
-
-const categories = ref([
-  {
-    title: 'Accessories',
-    value: 'Accessories',
-  },
-  {
-    title: 'Home Decor',
-    value: 'Home Decor',
-  },
-  {
-    title: 'Electronics',
-    value: 'Electronics',
-  },
-  {
-    title: 'Shoes',
-    value: 'Shoes',
-  },
-  {
-    title: 'Office',
-    value: 'Office',
-  },
-  {
-    title: 'Games',
-    value: 'Games',
-  },
-])
-
-const stockStatus = ref([
-  {
-    title: 'In Stock',
-    value: true,
-  },
-  {
-    title: 'Out of Stock',
-    value: false,
-  },
-])
-
-// Data table options
+// Tuỳ chọn phân trang của VDataTableServer
 const itemsPerPage = ref(10)
 const page = ref(1)
 const sortBy = ref()
@@ -136,122 +82,97 @@ const updateOptions = options => {
   orderBy.value = options.sortBy[0]?.order
 }
 
-const resolveCategory = category => {
-  if (category === 'Accessories')
-    return {
-      color: 'error',
-      icon: 'tabler-device-watch',
-    }
-  if (category === 'Home Decor')
-    return {
-      color: 'info',
-      icon: 'tabler-home',
-    }
-  if (category === 'Electronics')
-    return {
-      color: 'primary',
-      icon: 'tabler-device-imac',
-    }
-  if (category === 'Shoes')
-    return {
-      color: 'success',
-      icon: 'tabler-shoe',
-    }
-  if (category === 'Office')
-    return {
-      color: 'warning',
-      icon: 'tabler-briefcase',
-    }
-  if (category === 'Games')
-    return {
-      color: 'primary',
-      icon: 'tabler-device-gamepad-2',
-    }
-}
+// Bộ lọc trạng thái: is_active là boolean trong DB nên items dùng true/false
+const status = ref([
+  {
+    title: 'Đang bán',
+    value: true,
+  },
+  {
+    title: 'Ngừng bán',
+    value: false,
+  },
+])
 
-const resolveStatus = statusMsg => {
-  if (statusMsg === 'Scheduled')
-    return {
-      text: 'Scheduled',
-      color: 'warning',
-    }
-  if (statusMsg === 'Published')
-    return {
-      text: 'Publish',
-      color: 'success',
-    }
-  if (statusMsg === 'Inactive')
-    return {
-      text: 'Inactive',
-      color: 'error',
-    }
-}
+// ==================== Danh sách nhóm sản phẩm ====================
+// Gọi endpoint thật /v1/product-groups để lọc Category + hiển thị tên nhóm.
+// Endpoint này trả shape phân trang mặc định của Laravel, sau khi useApi
+// đã bóc envelope thì mảng bản ghi nằm ở thuộc tính `data`.
+const {
+  data: groupsData,
+} = await useApi(createUrl('/v1/product-groups', {
+  query: { per_page: 100 },
+}))
 
-/**
- * Ghép toàn bộ bộ lọc của trang thành một tham số `search` duy nhất theo đúng
- * cú pháp mà RequestCriteria hiểu: `search=field:value;field2:value2`.
- *
- * Chỉ những cột khai báo trong `$fieldSearchable` của ProductRepositoryEloquent
- * mới được phép lọc, cụ thể: `name`, `description` (điều kiện `like`),
- * `product_group_id` và `is_active` (điều kiện `=`).
- *
- * Ô tìm kiếm tự do được gán vào cột `name` vì khi dùng `searchJoin=and` thì mọi
- * cột trong chuỗi `search` đều phải thoả; nếu thêm cả `description` vào thì sản
- * phẩm buộc phải khớp đồng thời hai cột, không còn là tìm kiếm gần đúng nữa.
- *
- * @returns {string} Chuỗi điều kiện cho tham số `search`, rỗng khi không lọc gì.
- */
-const searchCriteria = computed(() => {
-  const conditions = []
+// Biến danh sách nhóm thành options cho AppSelect: { title: tên, value: id }
+const categories = computed(() =>
+  (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
+)
+
+// Map product_group_id -> tên nhóm để hiển thị cột Category
+const groupName = groupId =>
+  groupsData.value?.data?.find(group => group.id === groupId)?.name ?? '—'
+
+// Định dạng giá theo VND (backend trả số dạng string "25000.00")
+const formatPrice = value =>
+  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value)
+
+// Chip trạng thái dựa trên is_active (boolean thật của model)
+const resolveStatus = isActive =>
+  isActive
+    ? { text: 'Đang bán', color: 'success' }
+    : { text: 'Ngừng bán', color: 'error' }
+
+// ==================== Gọi API danh sách sản phẩm ====================
+// Ghép query thủ công để BỎ QUA các filter đang rỗng — nếu gửi is_active=null
+// hay product_group_id=null lên backend sẽ lọc sai (giá trị rỗng được loại
+// qua $request->filled nhưng gửi thừa vẫn là rác trên URL).
+const productsQuery = computed(() => {
+  const query = {
+    page: page.value,
+    per_page: itemsPerPage.value,
+    sortBy: sortBy.value,
+    orderBy: orderBy.value,
+  }
 
   if (searchQuery.value)
-    conditions.push(`name:${ searchQuery.value }`)
+    query.q = searchQuery.value
 
   if (selectedCategory.value !== null && selectedCategory.value !== undefined)
-    conditions.push(`product_group_id:${ selectedCategory.value }`)
+    query.product_group_id = selectedCategory.value
 
   if (selectedStatus.value !== null && selectedStatus.value !== undefined)
-    conditions.push(`is_active:${ selectedStatus.value }`)
+    query.is_active = selectedStatus.value
 
-  return conditions.join(';')
+  return query
 })
 
+// Endpoint thật của Laravel: GET /api/v1/products
+// Backend trả shape datatable: { products: [...], total, page, itemsPerPage, lastPage }
+// (đã bóc envelope ở useApi). Tham số tìm kiếm/lọc/sắp xếp do DataTableCriteria
+// bên backend dịch: q -> search, sortBy/orderBy -> orderBy/sortedBy.
 const {
   data: productsData,
   execute: fetchProducts,
-} = await useApi(createUrl('/apps/ecommerce/products', {
-  query: {
-    // Chuỗi điều kiện lọc + tìm kiếm, do RequestCriteria xử lý.
-    search: searchCriteria,
-
-    // Bắt buộc mọi điều kiện trong `search` phải thoả (mặc định của
-    // RequestCriteria là OR nên phải khai báo `and` một cách tường minh).
-    searchJoin: 'and',
-
-    // RequestCriteria dùng `orderBy` cho TÊN CỘT và `sortedBy` cho CHIỀU sắp
-    // xếp, ngược với cách đặt tên của VDataTableServer nên phải đảo lại ở đây.
-    orderBy: sortBy,
-    sortedBy: orderBy,
-
-    // Phân trang: ApiCrudController::index() đọc `per_page`, không đọc
-    // `itemsPerPage` của Vuetify.
-    page,
-    per_page: itemsPerPage,
-  },
+} = await useApi(createUrl('/v1/products', {
+  query: productsQuery,
 }))
 
-const products = computed(() => productsData.value.products)
-const totalProduct = computed(() => productsData.value.total)
+const products = computed(() => productsData.value?.products ?? [])
+const totalProduct = computed(() => productsData.value?.total ?? 0)
 
+// Xoá sản phẩm qua API thật rồi refetch lại danh sách.
+// Lưu ý: biến toàn cục $api của template KHÔNG tồn tại trong bản Vue+Vite
+// này nên phải dùng useApi; 204 không có body nên .json() trả null là bình thường.
 const deleteProduct = async id => {
-  await $api(`apps/ecommerce/products/${ id }`, { method: 'DELETE' })
+  await useApi(`/v1/products/${id}`, { method: 'DELETE' }).json()
 
-  // Delete from selectedRows
+  // Xoá khỏi danh sách đang chọn
   const index = selectedRows.value.findIndex(row => row === id)
   if (index !== -1)
     selectedRows.value.splice(index, 1)
 
-  // Refetch products
+  // Tải lại danh sách sản phẩm
   fetchProducts()
 }
 </script>
@@ -333,15 +254,15 @@ const deleteProduct = async id => {
 
     <!-- 👉 products -->
     <VCard
-      title="Filters"
+      title="Bộ lọc"
       class="mb-6"
     >
       <VCardText>
         <VRow>
-          <!-- 👉 Select Status -->
+          <!-- 👉 Lọc theo trạng thái is_active -->
           <VCol
             cols="12"
-            sm="4"
+            sm="6"
           >
             <AppSelect
               v-model="selectedStatus"
@@ -352,29 +273,15 @@ const deleteProduct = async id => {
             />
           </VCol>
 
-          <!-- 👉 Select Category -->
+          <!-- 👉 Lọc theo nhóm sản phẩm (product_group_id) -->
           <VCol
             cols="12"
-            sm="4"
+            sm="6"
           >
             <AppSelect
               v-model="selectedCategory"
               placeholder="Category"
               :items="categories"
-              clearable
-              clear-icon="tabler-x"
-            />
-          </VCol>
-
-          <!-- 👉 Select Stock Status -->
-          <VCol
-            cols="12"
-            sm="4"
-          >
-            <AppSelect
-              v-model="selectedStock"
-              placeholder="Stock"
-              :items="stockStatus"
               clearable
               clear-icon="tabler-x"
             />
@@ -389,7 +296,7 @@ const deleteProduct = async id => {
           <!-- 👉 Search  -->
           <AppTextField
             v-model="searchQuery"
-            placeholder="Search Product"
+            placeholder="Tìm sản phẩm"
             style="inline-size: 200px;"
             class="me-3"
           />
@@ -407,7 +314,7 @@ const deleteProduct = async id => {
             color="secondary"
             prepend-icon="tabler-upload"
           >
-            Export
+            Xuất file
           </VBtn>
 
           <VBtn
@@ -415,7 +322,7 @@ const deleteProduct = async id => {
             prepend-icon="tabler-plus"
             @click="$router.push('/apps/ecommerce/product/add')"
           >
-            Add Product
+            Thêm sản phẩm
           </VBtn>
         </div>
       </div>
@@ -434,48 +341,34 @@ const deleteProduct = async id => {
         class="text-no-wrap"
         @update:options="updateOptions"
       >
-        <!-- product  -->
+        <!-- Sản phẩm: ảnh + tên từ các trường thật image_url / name -->
         <template #item.product="{ item }">
           <div class="d-flex align-center gap-x-4">
             <VAvatar
-              v-if="item.image"
+              v-if="item.image_url"
               size="38"
               variant="tonal"
               rounded
-              :image="item.image"
+              :image="item.image_url"
             />
-            <div class="d-flex flex-column">
-              <span class="text-body-1 font-weight-medium text-high-emphasis">{{ item.productName }}</span>
-              <span class="text-body-2">{{ item.productBrand }}</span>
-            </div>
+            <span class="text-body-1 font-weight-medium text-high-emphasis">{{ item.name }}</span>
           </div>
         </template>
 
-        <!-- category -->
+        <!-- Nhóm sản phẩm: map product_group_id sang tên nhóm -->
         <template #item.category="{ item }">
-          <VAvatar
-            size="30"
-            variant="tonal"
-            :color="resolveCategory(item.category)?.color"
-            class="me-4"
-          >
-            <VIcon
-              :icon="resolveCategory(item.category)?.icon"
-              size="18"
-            />
-          </VAvatar>
-          <span class="text-body-1 text-high-emphasis">{{ item.category }}</span>
+          <span class="text-body-1 text-high-emphasis">{{ groupName(item.product_group_id) }}</span>
         </template>
 
-        <!-- stock -->
-        <template #item.stock="{ item }">
-          <VSwitch :model-value="item.stock" />
+        <!-- Giá: định dạng VND -->
+        <template #item.price="{ item }">
+          <span class="text-body-1">{{ formatPrice(item.price) }}</span>
         </template>
 
-        <!-- status -->
+        <!-- Trạng thái: chip dựa trên is_active -->
         <template #item.status="{ item }">
           <VChip
-            v-bind="resolveStatus(item.status)"
+            v-bind="resolveStatus(item.is_active)"
             density="default"
             label
             size="small"
@@ -496,7 +389,7 @@ const deleteProduct = async id => {
                   value="download"
                   prepend-icon="tabler-download"
                 >
-                  Download
+                  Tải xuống
                 </VListItem>
 
                 <VListItem
@@ -504,14 +397,14 @@ const deleteProduct = async id => {
                   prepend-icon="tabler-trash"
                   @click="deleteProduct(item.id)"
                 >
-                  Delete
+                  Xóa
                 </VListItem>
 
                 <VListItem
                   value="duplicate"
                   prepend-icon="tabler-copy"
                 >
-                  Duplicate
+                  Nhân bản
                 </VListItem>
               </VList>
             </VMenu>

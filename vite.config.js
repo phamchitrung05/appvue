@@ -15,6 +15,16 @@ import svgLoader from 'vite-svg-loader'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Dev server proxy: chuyển mọi request /api/* tới server Laravel (php artisan serve)
+  // để frontend gọi API thật khi chạy `npm run dev` mà không vướng CORS.
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [// Docs: https://github.com/posva/unplugin-vue-router
   // ℹ️ This plugin should be placed before vue plugin
     VueRouter({
