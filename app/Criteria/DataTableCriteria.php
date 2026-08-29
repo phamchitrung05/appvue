@@ -82,6 +82,15 @@ class DataTableCriteria extends RequestCriteria
             }
 
             $value = (string) $this->request->query($field);
+
+            // Chuẩn hoá giá trị boolean dạng chữ gửi từ query string
+            // ('true'/'false' thành '1'/'0') để so sánh đúng với cột boolean
+            // trên mọi driver DB — SQLite so sánh chặt kiểu nên 'true'
+            // không bao giờ khớp với giá trị 1 trong DB.
+            if (in_array(strtolower($value), ['true', 'false'], true)) {
+                $value = strtolower($value) === 'true' ? '1' : '0';
+            }
+
             $condition = strtolower(trim((string) $condition));
 
             if (in_array($condition, ['like', 'ilike'], true)) {
