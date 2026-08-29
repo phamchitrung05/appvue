@@ -210,6 +210,7 @@ protected function isAccessible(User $user, ?string $path = null): bool
 - **Mọi comment / PHPDoc trong code phải viết bằng TIẾNG VIỆT**, mô tả chi tiết chức năng của class, method, tham số và giá trị trả về — áp dụng cho cả file mới lẫn khi sửa code cũ. Message API trả về cho người dùng cũng dùng tiếng Việt (tập trung ở `config/messages.php`).
 - Controller không hard-code chuỗi message; luôn trả response qua `BaseResponseService` (envelope `{success, status, code, message, data}`), message mặc định đọc từ `config/messages.php`.
 - **Response lỗi phải kèm trường `code`** — mã lỗi ổn định viết HOA (vd: `VALIDATION_FAILED`, `PRODUCT_NOT_FOUND`, `UNAUTHENTICATED`) để frontend báo lại, backend tra tức thì. Mã mặc định theo HTTP status nằm ở `messages.codes.by_status`; mã theo tài nguyên ở `messages.codes.crud`. Khi thêm loại lỗi mới, khai báo code trong config trước rồi mới dùng.
+- Frontend: lời nhắc validate / thông báo form KHÔNG hard-code trong trang — tập trung ở `resources/js/utils/validationMessages.js` (nhóm theo tài nguyên: `product`, `productGroup`...), tương ứng với `config/messages.php` của backend.
 
 # Ghi chú phiên làm việc — cập nhật sau mỗi buổi code quan trọng
 
@@ -238,7 +239,17 @@ Ngôn ngữ làm việc với user: **tiếng Việt**.
 4. Chạy app: `npm run dev` + `php artisan serve`, hoặc gộp bằng `composer run dev`
 
 ## Tra cứu phiên cũ (khi cần ngữ cảnh chi tiết)
+- Phiên 30/08/2026 (trang danh mục + dialogs + drag&drop): `sess_a26d9f68-d712-46f7-b78e-3f03ceac4009`
 - Phiên ZCode 29/08/2026 giải thích `DataTableCriteria`: `sess_618156d7-fc11-496b-a7cc-37a34ace13e2` — thử `ReadSessionContext` với id này nếu lịch sử session đồng bộ theo tài khoản; không được thì dựa vào phần ghi chú ở trên.
+
+## Phiên 30/08/2026 (tiếp máy nhà) — trang Danh mục + dialogs
+- Trang Danh mục (`resources/js/pages/apps/ecommerce/product/category-list.vue`) viết lại hoàn toàn theo mockup user cung cấp: cột trái = danh sách product_group + badge số lượng, cột phải = lưới card sản phẩm của nhóm đang chọn (search trong nhóm debounce 400ms + VPagination). KHÔNG có nút quay lại/tiêu đề "Thêm sản phẩm".
+- **Dependency mới `@formkit/drag-and-drop`** — pull xong phải chạy `npm install`. Kéo thả sắp xếp nhóm: plugins `[animations(), place()]` — `place()` = đang kéo CHỈ highlight vị trí sẽ thả, thả hẳn mới cập nhật danh sách (yêu cầu rõ của user); `animations()` = trượt FLIP mượt (bổ sung bằng `<TransitionGroup name="flip">` bọc v-for, không có tag để giữ item là con trực tiếp của VList — FormKit cần thế). Lưu sort_order debounce 400ms (`useDebounceFn`), chỉ PUT nhóm đổi chỗ, chuẩn hóa 1..n.
+- `useDragAndDrop` quản lý luôn ref `groups`; sync từ API qua watcher `groupsData` với cờ `syncingGroups` (chống persist nhầm khi sync). Sort_order 0/null = chưa xếp → xuống cuối; nhóm mới từ header "Danh mục" được đẩy xuống cuối + gán sort_order = n+1 (PUT ngay).
+- Components mới (auto-registered từ `resources/js/components/`): `ProductGroupCreateDialog` (thêm nhóm, hỗ trợ slot `#activator` nhận `open`), `ProductGroupEditDialog` (sửa nhóm, `:group` + v-model mở/đóng), `ProductCreateDialog` (thêm nhanh sản phẩm — 6 field như product/add, prop `group-id` chọn sẵn nhóm đang xem). Cả 3 emit `created`/`saved` + snackbar riêng.
+- **Lời nhắc/thông báo form tập trung ở `resources/js/utils/validationMessages.js`** (nhóm theo tài nguyên: `product`, `productGroup`) — KHÔNG hard-code chuỗi trong trang. Đây là quy ước mới áp dụng cho các form sau này.
+- Bug đã sửa trong phiên: (1) `useApi` không serialize object body khi POST/PATCH + mất Content-Type → Laravel đọc không ra JSON → 422 VALIDATION_FAILED; đã tự stringify trong `beforeFetch` (áp dụng toàn app); (2) giá trị trả về từ `useApi(...).json()` là REF — phải đọc `.value` (statusCode/error/productsData...); (3) Vite dev thỉnh thoảng serve module cũ sau khi sửa code → `touch <file>` rồi reload.
+- Trạng thái data test (sqlite): nhóm "Gỏi Thái chua ngọt" đang Ngừng bán (tác dụng phụ khi test dialog sửa); sort_order các nhóm chuẩn hóa 1..n trừ nhóm tạo mới chưa kéo. Đếm sản phẩm theo nhóm đang đếm client-side (request `itemsPerPage=-1`) — catalog lớn thì cần endpoint aggregate.
 
 ## Phiên 29/08/2026 (máy nhà)
 - Thêm debounce 500ms cho ô tìm kiếm trang products + whitelist sort (`$fieldSortable`) + bật sort 4 cột dữ liệu, key headers đổi trùng tên cột DB.
