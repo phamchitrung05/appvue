@@ -202,3 +202,31 @@ protected function isAccessible(User $user, ?string $path = null): bool
 - To run all tests in a file: `php artisan test tests/Feature/ExampleTest.php`.
 - To filter on a particular test name: `php artisan test --filter=testName` (recommended after making a change to a related file).
 </laravel-boost-guidelines>
+
+=== project session notes (đồng bộ giữa các máy qua git) ===
+
+# Ghi chú phiên làm việc — cập nhật sau mỗi buổi code quan trọng
+
+Ngôn ngữ làm việc với user: **tiếng Việt**.
+
+## Tổng quan kiến trúc
+- Laravel 12 + Vue 3 (Vuetify) + `prettus/l5-repository` (repository pattern), API JSON CRUD.
+- Controllers: `app/Http/Controllers/Api/*Controller.php` kế thừa `ApiCrudController` — chỉ khai báo `repositoryClass()` + `createRules()/updateRules()`.
+- Repositories: `app/Repositories/*RepositoryEloquent` — mỗi repo `pushCriteria(app(DataTableCriteria::class))` trong `boot()`; `$fieldSearchable` đóng vai trò whitelist cho tìm kiếm/lọc.
+- `app/Criteria/DataTableCriteria.php`: dịch tham số Vuetify (`q`, `sortBy`, `orderBy`=chiều) sang cú pháp `RequestCriteria` (`search`, `orderBy`=tên cột, `sortedBy`=chiều), rồi áp tìm kiếm + sắp xếp qua `parent::apply()` + lọc theo cột qua `applyFieldFilters()`.
+- Lưu ý đã phân tích (chưa sửa): `ApiCrudController::index()` push thêm `RequestCriteria` gốc → tìm kiếm/sắp xếp bị áp 2 lần (vô hại nhưng dư). Ý tưởng: bỏ dòng đó vì `DataTableCriteria` đã bao trọn.
+- Trang products (`resources/js/pages/apps/ecommerce/product/list/index.vue`) tự map tham số ở frontend: gửi thẳng `search=name:...;product_group_id:...&searchJoin=and&orderBy=<cột>&sortedBy=<chiều>`.
+- Routes API: `routes/api.php` dùng `Route::apiResource` cho từng resource.
+
+## Trạng thái máy đã làm việc (Windows, project tại `D:\Ai\appvue`)
+- Đã clone `https://github.com/phamchitrung05/appvue`, đã chạy `composer install` + `npm install` thành công (Laravel 12.36.1, Vite 7.1.12).
+- Chưa có file `.env`, chưa chạy migrate.
+
+## Checklist khi sang máy mới
+1. Clone/pull repo `https://github.com/phamchitrung05/appvue`
+2. `composer install && npm install`
+3. `cp .env.example .env && php artisan key:generate` (+ `php artisan migrate` nếu có DB)
+4. Chạy app: `npm run dev` + `php artisan serve`, hoặc gộp bằng `composer run dev`
+
+## Tra cứu phiên cũ (khi cần ngữ cảnh chi tiết)
+- Phiên ZCode 29/08/2026 giải thích `DataTableCriteria`: `sess_618156d7-fc11-496b-a7cc-37a34ace13e2` — thử `ReadSessionContext` với id này nếu lịch sử session đồng bộ theo tài khoản; không được thì dựa vào phần ghi chú ở trên.
