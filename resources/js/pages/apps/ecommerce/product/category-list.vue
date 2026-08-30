@@ -13,7 +13,7 @@ const { data: groupsData, execute: fetchGroups } = await useApi(createUrl('/v1/p
 // "kéo chỉ hiện vị trí sẽ thả" (highlight), thả hẳn ra mới cập nhật danh
 // sách; plugin `animations` cho hiệu ứng trượt mượt khi di chuyển.
 const [groupListEl, groups] = useDragAndDrop([], {
-  plugins: [animations()],
+  plugins: [animations(), place()],
   draggingClass: 'group-dragging',
   dropZoneClass: 'group-drop-target',
 
