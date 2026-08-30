@@ -36,6 +36,8 @@ class DiningTable extends Model implements Transformable
      */
     protected $fillable = [
         'name',
+        'area',
+        'reserved_at',
         'store_id',
     ];
 
@@ -48,6 +50,7 @@ class DiningTable extends Model implements Transformable
     {
         return [
             'store_id' => 'integer',
+            'reserved_at' => 'datetime',
         ];
     }
 

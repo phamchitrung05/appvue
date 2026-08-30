@@ -4,8 +4,6 @@ namespace Database\Seeders;
 
 use App\Models\DiningTable;
 use App\Models\Order;
-use App\Models\OrderItem;
-use App\Models\Payment;
 use App\Models\Printer;
 use App\Models\Product;
 use App\Models\ProductGroup;
@@ -51,43 +49,38 @@ class DatabaseSeeder extends Seeder
                 'image_url' => fake()->imageUrl(640, 480, 'food'),
             ]));
 
-        $tables = collect(range(1, 5))->map(fn (int $i): DiningTable => DiningTable::create([
-            'name' => "Bàn {$i}",
-            'store_id' => $stores->random()->id,
-        ]));
+        // ==================== Sơ đồ bàn ====================
+        // 14 bàn trong nhà (01..14) + 6 bàn ngoài trời (T01..T06), độ trạng
+        // thái giống màn hình Order/List: trống, có khách (phiên mở + đơn),
+        // đang order (phiên mở chưa có đơn) và đã đặt (reserved_at).
+        $tables = collect([
+            ...collect(range(1, 14))->map(fn (int $i): array => ['name' => sprintf('%02d', $i), 'area' => 'indoor']),
+            ...collect(range(1, 6))->map(fn (int $i): array => ['name' => sprintf('T%02d', $i), 'area' => 'outdoor']),
+        ])->map(fn (array $attrs): DiningTable => DiningTable::create($attrs + ['store_id' => $stores->random()->id]));
 
-        $sessions = $tables->map(fn (DiningTable $table): TableSession => TableSession::create([
-            'dining_table_id' => $table->id,
-            'start_time' => fake()->dateTimeBetween('-3 days', '-1 hours'),
-            'end_time' => fake()->boolean(60) ? fake()->dateTimeBetween('-1 hours', 'now') : null,
-            'status' => fake()->randomElement(['open', 'closed', 'cancelled']),
-        ]));
+        $tableByName = $tables->keyBy('name');
 
-        $orders = $sessions->map(fn (TableSession $session): Order => Order::create([
-            'table_session_id' => $session->id,
-            'status' => fake()->randomElement(['open', 'paid', 'cancelled']),
-            'total' => fake()->numberBetween(50, 500) * 1000,
-            'notes' => fake()->boolean(40) ? fake()->sentence() : null,
-        ]));
+        // Bàn có khách: phiên mở + đơn chưa thanh toán.
+        collect([
+            ['name' => '03', 'minutes' => 45, 'total' => 350000],
+            ['name' => '07', 'minutes' => 80, 'total' => 450000],
+            ['name' => 'T02', 'minutes' => 35, 'total' => 220000],
+        ])->each(fn (array $attrs): TableSession => $this->createOpenSession(
+            $tableByName->get($attrs['name']),
+            now()->subMinutes($attrs['minutes']),
+            $attrs['total'],
+        ));
 
-        $orders->each(function (Order $order) use ($products): void {
-            $product = $products->random();
+        // Bàn đang order: phiên mở nhưng chưa chốt đơn nào.
+        collect([['name' => '04', 'minutes' => 15], ['name' => 'T04', 'minutes' => 10]])
+            ->each(fn (array $attrs): TableSession => $this->createOpenSession(
+                $tableByName->get($attrs['name']),
+                now()->subMinutes($attrs['minutes']),
+            ));
 
-            OrderItem::create([
-                'order_id' => $order->id,
-                'product_id' => $product->id,
-                'quantity' => fake()->numberBetween(1, 4),
-                'unit_price' => $product->price,
-                'notes' => fake()->boolean(30) ? 'Ít đá, ít đường' : null,
-            ]);
-
-            Payment::create([
-                'order_id' => $order->id,
-                'amount' => $order->total,
-                'status' => $order->status === 'paid' ? 'completed' : 'pending',
-                'paid_at' => $order->status === 'paid' ? now() : null,
-            ]);
-        });
+        // Bàn đã đặt trước: chỉ set giờ hẹn, chưa có phiên.
+        $tableByName->get('09')->update(['reserved_at' => now()->setTime(14, 0)]);
+        $tableByName->get('T06')->update(['reserved_at' => now()->setTime(15, 0)]);
 
         collect(range(1, 5))->each(fn (int $i): Printer => Printer::create([
             'store_id' => $stores->random()->id,
@@ -104,5 +97,28 @@ class DatabaseSeeder extends Seeder
         );
 
         User::factory(4)->create(['store_id' => $stores->random()->id]);
+    }
+
+    /**
+     * Tạo một phiên bàn đang mở, kèm đơn mở với tổng tiền tuỳ chọn
+     * (có đơn → bàn "có khách", không đơn → bàn "đang order").
+     */
+    private function createOpenSession(DiningTable $table, \DateTimeInterface $startTime, ?int $total = null): TableSession
+    {
+        $session = TableSession::create([
+            'dining_table_id' => $table->id,
+            'start_time' => $startTime,
+            'status' => 'open',
+        ]);
+
+        if ($total !== null) {
+            Order::create([
+                'table_session_id' => $session->id,
+                'status' => 'open',
+                'total' => $total,
+            ]);
+        }
+
+        return $session;
     }
 }

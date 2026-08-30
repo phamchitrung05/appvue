@@ -1,386 +1,231 @@
 <script setup>
-import masterCardDark from '@images/icons/payments/img/master-dark.png'
-import masterCardLight from '@images/icons/payments/img/mastercard.png'
-import paypalDark from '@images/icons/payments/img/paypal-dark.png'
-import paypalLight from '@images/icons/payments/img/paypal-light.png'
+import { useApi } from '@/composables/useApi'
 
-const widgetData = ref([
-  {
-    title: 'Pending Payment',
-    value: 56,
-    icon: 'tabler-calendar-stats',
-  },
-  {
-    title: 'Completed',
-    value: 12689,
-    icon: 'tabler-checks',
-  },
-  {
-    title: 'Refunded',
-    value: 124,
-    icon: 'tabler-wallet',
-  },
-  {
-    title: 'Failed',
-    value: 32,
-    icon: 'tabler-alert-octagon',
-  },
-])
+// ==================== Sơ đồ bàn ăn (Order/List) ====================
+// Toàn bộ bàn lấy từ API thật GET /v1/dining-tables/floor — mỗi bàn là một
+// record của bảng dining_table, trạng thái (trống / có khách / đang order /
+// đã đặt), thời gian và tổng tiền do backend suy ra từ phiên bàn + đơn hàng.
+const {
+  data: floorData,
+  execute: fetchFloor,
+  isFetching: floorLoading,
+} = await useApi('/v1/dining-tables/floor')
 
-const mastercard = useGenerateImageVariant(masterCardLight, masterCardDark)
-const paypal = useGenerateImageVariant(paypalLight, paypalDark)
+const tables = computed(() => floorData.value?.tables ?? [])
+
+// ==================== Bộ lọc khu vực & tìm bàn ====================
+const selectedArea = ref('all')
 const searchQuery = ref('')
 
-// Data table options
-const itemsPerPage = ref(10)
-const page = ref(1)
-const sortBy = ref()
-const orderBy = ref()
-const selectedRows = ref([])
+// Debounce 500ms để không gọi lọc/gõ nào sinh request liên tục (lọc làm ở
+// client vì số bàn nhỏ, nhưng vẫn giữ trải nghiệm gõ mượt).
+const debouncedSearchQuery = refDebounced(searchQuery, 300)
 
-// Data table Headers
-const headers = [
-  {
-    title: 'Order',
-    key: 'order',
-  },
-  {
-    title: 'Date',
-    key: 'date',
-  },
-  {
-    title: 'Customers',
-    key: 'customers',
-  },
-  {
-    title: 'Payment',
-    key: 'payment',
-    sortable: false,
-  },
-  {
-    title: 'Status',
-    key: 'status',
-  },
-  {
-    title: 'Method',
-    key: 'method',
-    sortable: false,
-  },
-  {
-    title: 'Action',
-    key: 'actions',
-    sortable: false,
-  },
-]
+const areaTabs = computed(() => [
+  { title: 'Tất cả', value: 'all', count: tables.value.length },
+  { title: 'Trong nhà', value: 'indoor', count: tables.value.filter(table => resolveAreaKey(table) === 'indoor').length },
+  { title: 'Ngoài trời', value: 'outdoor', count: tables.value.filter(table => resolveAreaKey(table) === 'outdoor').length },
+])
 
-const updateOptions = options => {
-  sortBy.value = options.sortBy[0]?.key
-  orderBy.value = options.sortBy[0]?.order
+// Dữ liệu cũ có thể chưa có area → coi như trong nhà.
+const resolveAreaKey = table => table.area ?? 'indoor'
+
+const filteredTables = computed(() => {
+  const keyword = debouncedSearchQuery.value.trim().toLowerCase()
+
+  return tables.value.filter(table => {
+    const matchArea = selectedArea.value === 'all' || resolveAreaKey(table) === selectedArea.value
+    const matchKeyword = !keyword || table.name.toLowerCase().includes(keyword)
+
+    return matchArea && matchKeyword
+  })
+})
+
+// ==================== Trạng thái bàn ====================
+// Map status (key tiếng Anh trả về từ API) sang nhãn tiếng Việt + màu.
+// Class màu viết dạng chuỗi literal ('text-success'...) để Vuetify quét
+// được và sinh style tương ứng.
+const STATUS_META = {
+  available: { label: 'Trống', color: 'success', textClass: 'text-success' },
+  occupied: { label: 'Có khách', color: 'error', textClass: 'text-error' },
+  ordering: { label: 'Đang order', color: 'warning', textClass: 'text-warning' },
+  reserved: { label: 'Đã đặt', color: 'secondary', textClass: 'text-secondary' },
 }
 
-const resolvePaymentStatus = status => {
-  if (status === 1)
-    return {
-      text: 'Paid',
-      color: 'success',
-    }
-  if (status === 2)
-    return {
-      text: 'Pending',
-      color: 'warning',
-    }
-  if (status === 3)
-    return {
-      text: 'Cancelled',
-      color: 'secondary',
-    }
-  if (status === 4)
-    return {
-      text: 'Failed',
-      color: 'error',
-    }
+const statusMeta = table => STATUS_META[table.status] ?? STATUS_META.available
+
+// Định dạng tiền theo kiểu rút gọn Việt Nam: 350000 → "350.000đ"
+const formatMoney = value =>
+  `${new Intl.NumberFormat('vi-VN').format(value ?? 0)}đ`
+
+// Cập nhật mỗi 30s để đồng hồ đếm thời gian ngồi của các bàn không bị đứng.
+const now = useNow({ interval: 30000 })
+
+// Cột thời gian trên thẻ bàn:
+// - Trống: '--:--'
+// - Có khách / Đang order: thời gian đã ngồi tính từ start_time (HH:MM)
+// - Đã đặt: giờ hẹn cụ thể (HH:MM)
+const formatTableTime = table => {
+  if (table.status === 'reserved' && table.reserved_at)
+    return new Date(table.reserved_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+  if ((table.status === 'occupied' || table.status === 'ordering') && table.started_at) {
+    const elapsedMinutes = Math.max(0, Math.floor((now.value - new Date(table.started_at)) / 60000))
+    const hours = Math.floor(elapsedMinutes / 60)
+    const minutes = elapsedMinutes % 60
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+  }
+
+  return '--:--'
 }
 
-const resolveStatus = status => {
-  if (status === 'Delivered')
-    return {
-      text: 'Delivered',
-      color: 'success',
-    }
-  if (status === 'Out for Delivery')
-    return {
-      text: 'Out for Delivery',
-      color: 'primary',
-    }
-  if (status === 'Ready to Pickup')
-    return {
-      text: 'Ready to Pickup',
-      color: 'info',
-    }
-  if (status === 'Dispatched')
-    return {
-      text: 'Dispatched',
-      color: 'warning',
-    }
-}
+// ==================== Gom bàn theo khu vực ====================
+const areaSections = computed(() => [
+  { key: 'indoor', title: 'Khu trong nhà', icon: 'tabler-home', tables: filteredTables.value.filter(table => resolveAreaKey(table) === 'indoor') },
+  { key: 'outdoor', title: 'Khu ngoài trời', icon: 'tabler-umbrella', tables: filteredTables.value.filter(table => resolveAreaKey(table) === 'outdoor') },
+])
 
-const {
-  data: ordersData,
-  execute: fetchOrders,
-} = await useApi(createUrl('/apps/ecommerce/orders', {
-  query: {
-    q: searchQuery,
-    page,
-    itemsPerPage,
-    sortBy,
-    orderBy,
-  },
-}))
-
-const orders = computed(() => ordersData.value.orders)
-const totalOrder = computed(() => ordersData.value.total)
-
-const deleteOrder = async id => {
-  await $api(`/apps/ecommerce/orders/${ id }`, { method: 'DELETE' })
-
-  // Delete from selectedRows
-  const index = selectedRows.value.findIndex(row => row === id)
-  if (index !== -1)
-    selectedRows.value.splice(index, 1)
-
-  // Refetch Orders
-  fetchOrders()
-}
+const legend = Object.values(STATUS_META).map(meta => ({ label: meta.label, color: meta.color }))
 </script>
 
 <template>
   <div>
-    <VCard class="mb-6">
-      <!-- 👉 Widgets  -->
+    <!-- 👉 Thanh lọc khu vực + tìm bàn -->
+    <div class="d-flex flex-wrap align-center gap-4 mb-6">
+      <VBtn
+        v-for="tab in areaTabs"
+        :key="tab.value"
+        rounded="pill"
+        :variant="selectedArea === tab.value ? 'tonal' : 'outlined'"
+        color="primary"
+        @click="selectedArea = tab.value"
+      >
+        {{ tab.title }} ({{ tab.count }})
+      </VBtn>
+
+      <VSpacer />
+
+      <AppTextField
+        v-model="searchQuery"
+        placeholder="Tìm bàn..."
+        prepend-inner-icon="tabler-search"
+        clearable
+        clear-icon="tabler-x"
+        style="inline-size: 220px;"
+        hide-details
+      />
+
+      <!-- Tải lại sơ đồ bàn (trạng thái/thu tiền thay đổi liên tục trong ca) -->
+      <IconBtn
+        :loading="floorLoading"
+        @click="fetchFloor"
+      >
+        <VIcon icon="tabler-refresh" />
+      </IconBtn>
+    </div>
+
+    <!-- 👉 Sơ đồ các khu bàn -->
+    <VCard :loading="floorLoading">
       <VCardText>
-        <VRow>
-          <template
-            v-for="(data, id) in widgetData"
-            :key="id"
+        <template
+          v-for="(section, sectionIndex) in areaSections"
+          :key="section.key"
+        >
+          <div
+            v-if="section.tables.length"
+            :class="sectionIndex > 0 ? 'mt-6' : ''"
           >
-            <VCol
-              cols="12"
-              sm="6"
-              md="3"
-              class="px-6"
-            >
-              <div
-                class="d-flex justify-space-between"
-                :class="$vuetify.display.xs
-                  ? id !== widgetData.length - 1 ? 'border-b pb-4' : ''
-                  : $vuetify.display.sm
-                    ? id < (widgetData.length / 2) ? 'border-b pb-4' : ''
-                    : ''"
+            <!-- Tiêu đề khu -->
+            <div class="d-flex align-center gap-x-3 mb-4">
+              <VIcon
+                :icon="section.icon"
+                size="24"
+                class="text-high-emphasis"
+              />
+              <h3 class="text-h6">
+                {{ section.title }}
+              </h3>
+            </div>
+
+            <!-- Lưới thẻ bàn -->
+            <VRow>
+              <VCol
+                v-for="table in section.tables"
+                :key="table.id"
+                cols="6"
+                sm="4"
+                md="3"
+                lg="2"
               >
-                <div class="d-flex flex-column">
-                  <h4 class="text-h4">
-                    {{ data.value }}
-                  </h4>
-
-                  <div class="text-body-1">
-                    {{ data.title }}
-                  </div>
-                </div>
-
-                <VAvatar
+                <VCard
                   variant="tonal"
-                  rounded
-                  size="42"
+                  :color="statusMeta(table).color"
+                  class="h-100"
                 >
-                  <VIcon
-                    :icon="data.icon"
-                    size="26"
-                    class="text-high-emphasis"
-                  />
-                </VAvatar>
-              </div>
-            </VCol>
-            <VDivider
-              v-if="$vuetify.display.mdAndUp ? id !== widgetData.length - 1
-                : $vuetify.display.smAndUp ? id % 2 === 0
-                  : false"
-              vertical
-              inset
-              length="60"
-            />
-          </template>
-        </VRow>
-      </VCardText>
-    </VCard>
+                  <VCardText class="text-center py-4">
+                    <div class="text-h4 font-weight-bold mb-2">
+                      {{ table.name }}
+                    </div>
 
-    <VCard>
-      <!-- 👉 Filters -->
-      <VCardText>
-        <div class="d-flex justify-sm-space-between justify-start flex-wrap gap-4">
-          <AppTextField
-            v-model="searchQuery"
-            placeholder="Search Order"
-            style=" max-inline-size: 200px; min-inline-size: 200px;"
-          />
+                    <VChip
+                      :color="statusMeta(table).color"
+                      size="small"
+                      label
+                      class="mb-4"
+                    >
+                      {{ statusMeta(table).label }}
+                    </VChip>
 
-          <div class="d-flex gap-x-4 align-center">
-            <AppSelect
-              v-model="itemsPerPage"
-              style="min-inline-size: 6.25rem;"
-              :items="[5, 10, 20, 50, 100]"
-            />
-            <VBtn
-              variant="tonal"
-              color="secondary"
-              prepend-icon="tabler-upload"
-              text="Export"
-            />
+                    <VDivider class="mb-3" />
+
+                    <div class="d-flex align-center justify-center gap-x-2 text-body-2 mb-2">
+                      <VIcon
+                        icon="tabler-clock"
+                        size="18"
+                      />
+                      <span>{{ formatTableTime(table) }}</span>
+                    </div>
+
+                    <div class="d-flex align-center justify-center gap-x-2 text-body-2">
+                      <VIcon
+                        icon="tabler-cash"
+                        size="18"
+                      />
+                      <span class="font-weight-medium">{{ formatMoney(table.total) }}</span>
+                    </div>
+                  </VCardText>
+                </VCard>
+              </VCol>
+            </VRow>
           </div>
+        </template>
+
+        <!-- Không còn bàn nào sau khi lọc/tìm -->
+        <div
+          v-if="!filteredTables.length"
+          class="text-center text-body-1 py-10 text-disabled"
+        >
+          Không tìm thấy bàn nào phù hợp.
         </div>
       </VCardText>
 
       <VDivider />
 
-      <!-- 👉 Order Table -->
-      <VDataTableServer
-        v-model:items-per-page="itemsPerPage"
-        v-model:model-value="selectedRows"
-        v-model:page="page"
-        :headers="headers"
-        :items="orders"
-        :items-length="totalOrder"
-        show-select
-        class="text-no-wrap"
-        @update:options="updateOptions"
-      >
-        <!-- Order ID -->
-        <template #item.order="{ item }">
-          <RouterLink :to="{ name: 'apps-ecommerce-order-details-id', params: { id: item.order } }">
-            #{{ item.order }}
-          </RouterLink>
-        </template>
-
-        <!-- Date -->
-        <template #item.date="{ item }">
-          {{ new Date(item.date).toDateString() }}
-        </template>
-
-        <!-- Customers  -->
-        <template #item.customers="{ item }">
-          <div class="d-flex align-center gap-x-3">
-            <VAvatar
-              size="34"
-              :color="!item.avatar.length ? 'primary' : ''"
-              :variant="!item.avatar.length ? 'tonal' : undefined"
-            >
-              <VImg
-                v-if="item.avatar"
-                :src="item.avatar"
-              />
-
-              <span
-                v-else
-                class="font-weight-medium"
-              >{{ avatarText(item.customer) }}</span>
-            </VAvatar>
-
-            <div class="d-flex flex-column">
-              <div class="text-body-1 font-weight-medium">
-                <RouterLink
-                  :to="{ name: 'pages-user-profile-tab', params: { tab: 'profile' } }"
-                  class="text-link"
-                >
-                  {{ item.customer }}
-                </RouterLink>
-              </div>
-              <div class="text-body-2">
-                {{ item.email }}
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- Payments -->
-        <template #item.payment="{ item }">
-          <div
-            :class="`text-${resolvePaymentStatus(item.payment)?.color}`"
-            class="font-weight-medium d-flex align-center gap-x-2"
-          >
-            <VIcon
-              icon="tabler-circle-filled"
-              size="10"
-            />
-            <div style="line-height: 22px;">
-              {{ resolvePaymentStatus(item.payment)?.text }}
-            </div>
-          </div>
-        </template>
-
-        <!-- Status -->
-        <template #item.status="{ item }">
-          <VChip
-            v-bind="resolveStatus(item.status)"
-            label
-            size="small"
+      <!-- 👉 Chú thích màu trạng thái -->
+      <div class="d-flex flex-wrap justify-center align-center gap-x-6 gap-y-2 py-3">
+        <div
+          v-for="item in legend"
+          :key="item.label"
+          class="d-flex align-center gap-x-2 text-body-2"
+        >
+          <span
+            :class="`bg-${item.color}`"
+            style="inline-size: 10px; block-size: 10px; border-radius: 50%;"
           />
-        </template>
-
-        <!-- Method -->
-        <template #item.method="{ item }">
-          <div class="d-flex align-center">
-            <img
-              :src="item.method === 'mastercard' ? mastercard : paypal"
-              height="18"
-            >
-            <div class="text-body-1">
-              ...{{ item.method === 'mastercard' ? item.methodNumber : '@gmail.com' }}
-            </div>
-          </div>
-        </template>
-
-        <!-- Actions -->
-        <template #item.actions="{ item }">
-          <IconBtn>
-            <VIcon icon="tabler-dots-vertical" />
-            <VMenu activator="parent">
-              <VList>
-                <VListItem
-                  value="view"
-                  :to="{ name: 'apps-ecommerce-order-details-id', params: { id: item.order } }"
-                >
-                  View
-                </VListItem>
-                <VListItem
-                  value="delete"
-                  @click="deleteOrder(item.id)"
-                >
-                  Delete
-                </VListItem>
-              </VList>
-            </VMenu>
-          </IconBtn>
-        </template>
-
-        <!-- pagination -->
-        <template #bottom>
-          <TablePagination
-            v-model:page="page"
-            :items-per-page="itemsPerPage"
-            :total-items="totalOrder"
-          />
-        </template>
-      </VDataTableServer>
+          <span>{{ item.label }}</span>
+        </div>
+      </div>
     </VCard>
   </div>
 </template>
-
-<style lang="scss" scoped>
-.customer-title:hover {
-  color: rgba(var(--v-theme-primary)) !important;
-}
-
-.product-widget {
-  border-block-end: 1px solid rgba(var(--v-theme-on-surface), var(--v-border-opacity));
-  padding-block-end: 1rem;
-}
-</style>
