@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\DiningTable;
+use App\Models\TableZone;
 use App\Repositories\DiningTableRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,7 @@ class DiningTablesController extends ApiCrudController
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'area' => ['nullable', 'string', 'max:20', Rule::in(['indoor', 'outdoor'])],
+            'zone_id' => ['nullable', 'integer', Rule::exists('table_zones', 'id')],
             'reserved_at' => ['nullable', 'date'],
             'store_id' => ['nullable', 'integer', 'exists:store,id'],
         ];
@@ -32,15 +33,16 @@ class DiningTablesController extends ApiCrudController
     {
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'area' => ['sometimes', 'nullable', 'string', 'max:20', Rule::in(['indoor', 'outdoor'])],
+            'zone_id' => ['sometimes', 'nullable', 'integer', Rule::exists('table_zones', 'id')],
             'reserved_at' => ['sometimes', 'nullable', 'date'],
             'store_id' => ['sometimes', 'nullable', 'integer', 'exists:store,id'],
         ];
     }
 
     /**
-     * Sơ đồ bàn cho màn hình Order/List: trả toàn bộ bàn kèm trạng thái
-     * suy ra từ dữ liệu thật (không có cột trạng thái riêng trong DB).
+     * Sơ đồ bàn cho màn hình Order/List: trả các khu (table_zones) kèm
+     * danh sách bàn của từng khu, trạng thái bàn suy ra từ dữ liệu thật
+     * (không có cột trạng thái riêng trong DB).
      *
      * Quy tắc suy ra trạng thái:
      * - Có phiên đang mở (status=open, end_time=null) và phiên có đơn
@@ -55,27 +57,36 @@ class DiningTablesController extends ApiCrudController
      */
     public function floor(Request $request): JsonResponse
     {
-        $tables = DiningTable::query()
+        $zones = TableZone::query()
             ->with([
-                'tableSessions' => fn ($query) => $query
-                    ->where('status', 'open')
-                    ->whereNull('end_time')
-                    ->with(['orders' => fn ($orderQuery) => $orderQuery->where('status', '!=', 'cancelled')]),
+                'diningTables' => fn ($query) => $query
+                    ->orderBy('name')
+                    ->with([
+                        'tableSessions' => fn ($sessionQuery) => $sessionQuery
+                            ->where('status', 'open')
+                            ->whereNull('end_time')
+                            ->with(['orders' => fn ($orderQuery) => $orderQuery->where('status', '!=', 'cancelled')]),
+                    ]),
             ])
-            ->orderBy('area')
-            ->orderBy('name')
+            ->orderBy('id')
             ->get();
 
-        $payload = $tables->map(fn (DiningTable $table): array => $this->floorTableRow($table))->all();
+        $payload = $zones->map(fn (TableZone $zone): array => [
+            'id' => $zone->id,
+            'name' => $zone->name,
+            'tables' => $zone->diningTables
+                ->map(fn (DiningTable $table): array => $this->floorTableRow($table))
+                ->all(),
+        ])->all();
 
-        return $this->responder->success(['tables' => $payload]);
+        return $this->responder->success(['zones' => $payload]);
     }
 
     /**
      * Dựng một dòng dữ liệu bàn cho sơ đồ: trạng thái, mốc thời gian
      * (bắt đầu phiên hoặc giờ hẹn) và tổng tiền đơn hiện tại.
      *
-     * @return array{id: int, name: string, area: ?string, status: string, started_at: ?string, reserved_at: ?string, total: float}
+     * @return array{id: int, name: string, zone_id: ?int, status: string, started_at: ?string, reserved_at: ?string, total: float}
      */
     private function floorTableRow(DiningTable $table): array
     {
@@ -92,7 +103,7 @@ class DiningTablesController extends ApiCrudController
         return [
             'id' => $table->id,
             'name' => $table->name,
-            'area' => $table->area,
+            'zone_id' => $table->zone_id,
             'status' => $status,
             'started_at' => $startedAt?->toISOString(),
             'reserved_at' => $table->reserved_at?->toISOString(),

@@ -20,7 +20,7 @@ class DiningTableRepositoryEloquent extends BaseRepository implements DiningTabl
      */
     protected $fieldSearchable = [
         'name' => 'like',
-        'area',
+        'zone_id',
         'store_id',
     ];
 

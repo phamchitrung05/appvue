@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ProductGroup;
 use App\Models\Store;
 use App\Models\TableSession;
+use App\Models\TableZone;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -50,12 +51,16 @@ class DatabaseSeeder extends Seeder
             ]));
 
         // ==================== Sơ đồ bàn ====================
-        // 14 bàn trong nhà (01..14) + 6 bàn ngoài trời (T01..T06), độ trạng
-        // thái giống màn hình Order/List: trống, có khách (phiên mở + đơn),
-        // đang order (phiên mở chưa có đơn) và đã đặt (reserved_at).
+        // Khu vực bàn (table_zones) + 14 bàn trong nhà (01..14) + 6 bàn
+        // ngoài trời (T01..T06), đủ trạng thái giống màn hình Order/List:
+        // trống, có khách (phiên mở + đơn), đang order (phiên mở chưa có
+        // đơn) và đã đặt (reserved_at).
+        $indoorZone = TableZone::create(['name' => 'Trong nhà', 'is_active' => true, 'store_id' => $stores->random()->id]);
+        $outdoorZone = TableZone::create(['name' => 'Ngoài trời', 'is_active' => true, 'store_id' => $stores->random()->id]);
+
         $tables = collect([
-            ...collect(range(1, 14))->map(fn (int $i): array => ['name' => sprintf('%02d', $i), 'area' => 'indoor']),
-            ...collect(range(1, 6))->map(fn (int $i): array => ['name' => sprintf('T%02d', $i), 'area' => 'outdoor']),
+            ...collect(range(1, 14))->map(fn (int $i): array => ['name' => sprintf('%02d', $i), 'zone_id' => $indoorZone->id]),
+            ...collect(range(1, 6))->map(fn (int $i): array => ['name' => sprintf('T%02d', $i), 'zone_id' => $outdoorZone->id]),
         ])->map(fn (array $attrs): DiningTable => DiningTable::create($attrs + ['store_id' => $stores->random()->id]));
 
         $tableByName = $tables->keyBy('name');

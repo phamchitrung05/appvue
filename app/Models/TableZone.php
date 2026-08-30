@@ -9,35 +9,23 @@ use Prettus\Repository\Contracts\Transformable;
 use Prettus\Repository\Traits\TransformableTrait;
 
 /**
- * Class DiningTable.
+ * Class TableZone.
+ *
+ * Khu vực bàn theo chi nhánh (ví dụ: Trong nhà, Ngoài trời, Tầng 2...).
+ * Bàn ăn (DiningTable) tham chiếu tới đây qua zone_id.
  */
-class DiningTable extends Model implements Transformable
+class TableZone extends Model implements Transformable
 {
     use TransformableTrait;
 
     /**
-     * The table associated with the model.
-     *
-     * @var string
-     */
-    protected $table = 'dining_table';
-
-    /**
-     * Indicates if the model should be timestamped.
-     *
-     * @var bool
-     */
-    public $timestamps = false;
-
-    /**
      * The attributes that are mass assignable.
      *
-     * @var array
+     * @var list<string>
      */
     protected $fillable = [
         'name',
-        'zone_id',
-        'reserved_at',
+        'is_active',
         'store_id',
     ];
 
@@ -50,8 +38,7 @@ class DiningTable extends Model implements Transformable
     {
         return [
             'store_id' => 'integer',
-            'zone_id' => 'integer',
-            'reserved_at' => 'datetime',
+            'is_active' => 'boolean',
         ];
     }
 
@@ -60,13 +47,8 @@ class DiningTable extends Model implements Transformable
         return $this->belongsTo(Store::class);
     }
 
-    public function zone(): BelongsTo
+    public function diningTables(): HasMany
     {
-        return $this->belongsTo(TableZone::class, 'zone_id');
-    }
-
-    public function tableSessions(): HasMany
-    {
-        return $this->hasMany(TableSession::class);
+        return $this->hasMany(DiningTable::class, 'zone_id');
     }
 }

@@ -6,23 +6,33 @@ use App\Models\DiningTable;
 use App\Models\Order;
 use App\Models\Store;
 use App\Models\TableSession;
+use App\Models\TableZone;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
  * Kiểm tra endpoint sơ đồ bàn GET /api/v1/dining-tables/floor dùng cho
- * màn hình Order/List: trạng thái bàn suy ra từ phiên + đơn, thời gian
- * và tổng tiền trả về đúng từng trường hợp.
+ * màn hình Order/List: trả các khu (table_zones) kèm bàn, trạng thái bàn
+ * suy ra từ phiên + đơn, thời gian và tổng tiền trả về đúng từng trường hợp.
  */
 class DiningTableFloorTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function createTable(string $name = '01', ?string $area = 'indoor'): DiningTable
+    private function createZone(string $name = 'Trong nhà'): TableZone
+    {
+        return TableZone::create([
+            'name' => $name,
+            'is_active' => true,
+            'store_id' => Store::create(['name' => 'Chi nhánh trung tâm', 'is_active' => true])->id,
+        ]);
+    }
+
+    private function createTable(?TableZone $zone = null, string $name = '01'): DiningTable
     {
         return DiningTable::create([
             'name' => $name,
-            'area' => $area,
+            'zone_id' => $zone?->id,
             'store_id' => Store::create(['name' => 'Chi nhánh trung tâm', 'is_active' => true])->id,
         ]);
     }
@@ -36,20 +46,22 @@ class DiningTableFloorTest extends TestCase
         ]);
     }
 
-    public function test_floor_returns_available_table_without_session(): void
+    public function test_floor_groups_tables_by_zone(): void
     {
-        $this->createTable();
+        $zone = $this->createZone('Ngoài trời');
+        $this->createTable($zone, 'T01');
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.tables.0.status', 'available')
-            ->assertJsonPath('data.tables.0.total', 0)
-            ->assertJsonPath('data.tables.0.area', 'indoor');
+            ->assertJsonPath('data.zones.0.name', 'Ngoài trời')
+            ->assertJsonPath('data.zones.0.tables.0.name', 'T01')
+            ->assertJsonPath('data.zones.0.tables.0.status', 'available')
+            ->assertJsonPath('data.zones.0.tables.0.total', 0);
     }
 
     public function test_floor_marks_table_with_open_session_and_order_as_occupied(): void
     {
-        $table = $this->createTable();
+        $table = $this->createTable($this->createZone());
         $session = $this->openSession($table, 45);
 
         Order::create([
@@ -60,37 +72,35 @@ class DiningTableFloorTest extends TestCase
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.tables.0.status', 'occupied')
-            ->assertJsonPath('data.tables.0.total', 350000)
-            ->assertJsonPath('data.tables.0.started_at', $session->start_time->toISOString());
+            ->assertJsonPath('data.zones.0.tables.0.status', 'occupied')
+            ->assertJsonPath('data.zones.0.tables.0.total', 350000)
+            ->assertJsonPath('data.zones.0.tables.0.started_at', $session->start_time->toISOString());
     }
 
     public function test_floor_marks_table_with_open_session_without_order_as_ordering(): void
     {
-        $this->openSession($this->createTable(), 15);
+        $this->openSession($this->createTable($this->createZone()), 15);
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.tables.0.status', 'ordering')
-            ->assertJsonPath('data.tables.0.total', 0);
+            ->assertJsonPath('data.zones.0.tables.0.status', 'ordering')
+            ->assertJsonPath('data.zones.0.tables.0.total', 0);
     }
 
     public function test_floor_marks_reserved_table_without_session(): void
     {
-        $reservedAt = now()->setTime(14, 0);
-
-        $table = $this->createTable();
-        $table->update(['reserved_at' => $reservedAt]);
+        $table = $this->createTable($this->createZone());
+        $table->update(['reserved_at' => now()->setTime(14, 0)]);
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.tables.0.status', 'reserved')
-            ->assertJsonPath('data.tables.0.reserved_at', $table->refresh()->reserved_at->toISOString());
+            ->assertJsonPath('data.zones.0.tables.0.status', 'reserved')
+            ->assertJsonPath('data.zones.0.tables.0.reserved_at', $table->refresh()->reserved_at->toISOString());
     }
 
     public function test_floor_ignores_closed_sessions_when_resolving_status(): void
     {
-        $table = $this->createTable();
+        $table = $this->createTable($this->createZone());
 
         TableSession::create([
             'dining_table_id' => $table->id,
@@ -101,12 +111,12 @@ class DiningTableFloorTest extends TestCase
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.tables.0.status', 'available');
+            ->assertJsonPath('data.zones.0.tables.0.status', 'available');
     }
 
     public function test_floor_sums_only_non_cancelled_orders_of_the_active_session(): void
     {
-        $table = $this->createTable();
+        $table = $this->createTable($this->createZone());
         $session = $this->openSession($table);
 
         Order::create(['table_session_id' => $session->id, 'status' => 'open', 'total' => 100000]);
@@ -115,20 +125,22 @@ class DiningTableFloorTest extends TestCase
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.tables.0.status', 'occupied')
-            ->assertJsonPath('data.tables.0.total', 150000);
+            ->assertJsonPath('data.zones.0.tables.0.status', 'occupied')
+            ->assertJsonPath('data.zones.0.tables.0.total', 150000);
     }
 
-    public function test_floor_validates_area_on_create_via_crud_api(): void
+    public function test_dining_table_validates_zone_id_against_table_zones(): void
     {
         $this->postJson('/api/v1/dining-tables', [
             'name' => 'Bàn lạ',
-            'area' => 'tang-tret',
-        ])->assertStatus(422)->assertJsonValidationErrors(['area']);
+            'zone_id' => 424242,
+        ])->assertStatus(422)->assertJsonValidationErrors(['zone_id']);
+
+        $zone = $this->createZone();
 
         $this->postJson('/api/v1/dining-tables', [
             'name' => 'T01',
-            'area' => 'outdoor',
-        ])->assertCreated()->assertJsonPath('data.area', 'outdoor');
+            'zone_id' => $zone->id,
+        ])->assertCreated()->assertJsonPath('data.zone_id', $zone->id);
     }
 }
