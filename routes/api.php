@@ -9,10 +9,12 @@ use App\Http\Controllers\Api\ProductGroupsController;
 use App\Http\Controllers\Api\ProductsController;
 use App\Http\Controllers\Api\StoresController;
 use App\Http\Controllers\Api\TableSessionsController;
+use App\Http\Controllers\Api\TableZonesController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
     Route::apiResource('stores', StoresController::class);
+    Route::apiResource('table-zones', TableZonesController::class);
     Route::apiResource('product-groups', ProductGroupsController::class);
     Route::apiResource('products', ProductsController::class);
     // Sơ đồ bàn cho màn hình Order/List — phải đăng ký TRƯỚC apiResource

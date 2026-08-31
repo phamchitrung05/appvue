@@ -9,7 +9,7 @@
  */
 export const validationMessages = {
   product: {
-    // Form thêm sản phẩm (resources/js/pages/apps/ecommerce/product/add)
+    // Form thêm/sửa sản phẩm (product/add, ProductCreateDialog, ProductEditDialog)
     nameRequired: 'Vui lòng nhập tên sản phẩm',
     nameMax: 'Tên sản phẩm tối đa 255 ký tự',
     priceRequired: 'Vui lòng nhập giá bán',
@@ -17,6 +17,8 @@ export const validationMessages = {
     priceMin: 'Giá bán không được âm',
     createFailed: 'Không thể tạo sản phẩm. Vui lòng thử lại.',
     createSuccess: 'Đã thêm sản phẩm ":name".',
+    updateSuccess: 'Đã cập nhật sản phẩm ":name".',
+    updateFailed: 'Không thể cập nhật sản phẩm. Vui lòng thử lại.',
   },
 
   productGroup: {
@@ -28,5 +30,23 @@ export const validationMessages = {
     updateSuccess: 'Đã cập nhật nhóm hàng.',
     updateFailed: 'Không thể cập nhật nhóm hàng. Vui lòng thử lại.',
     orderSaved: 'Đã cập nhật thứ tự nhóm hàng.',
+  },
+
+  diningTable: {
+    // Dialog thêm nhanh bàn vào khu (DiningTableCreateDialog)
+    nameRequired: 'Vui lòng nhập tên bàn',
+    nameMax: 'Tên bàn tối đa 255 ký tự',
+    zoneRequired: 'Vui lòng chọn khu vực',
+    createFailed: 'Không thể thêm bàn. Vui lòng thử lại.',
+    createSuccess: 'Đã thêm bàn mới vào khu.',
+  },
+
+  area: {
+    // Trang thêm khu vực (area/add-area)
+    nameRequired: 'Vui lòng nhập tên khu',
+    nameMax: 'Tên khu tối đa 255 ký tự',
+    storeRequired: 'Vui lòng chọn cửa hàng',
+    createFailed: 'Không thể tạo khu vực. Vui lòng thử lại.',
+    createSuccess: 'Đã thêm khu vực mới.',
   },
 }

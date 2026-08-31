@@ -185,7 +185,6 @@ const submitProduct = async () => {
                 label="Nhóm hàng"
                 placeholder="Chọn nhóm hàng"
                 :items="productGroups"
-                clearable
                 clear-icon="tabler-x"
               />
             </VCol>

@@ -9,6 +9,7 @@ declare global {
   const $api: typeof import('./resources/js/utils/api.js')['$api']
   const COOKIE_MAX_AGE_1_YEAR: typeof import('./resources/js/utils/constants.js')['COOKIE_MAX_AGE_1_YEAR']
   const EffectScope: typeof import('vue')['EffectScope']
+  const TABLE_STATUSES: typeof import('./resources/js/utils/tableStatuses.js')['TABLE_STATUSES']
   const acceptHMRUpdate: typeof import('pinia')['acceptHMRUpdate']
   const alphaDashValidator: typeof import('./resources/js/@core/utils/validators.js')['alphaDashValidator']
   const alphaValidator: typeof import('./resources/js/@core/utils/validators.js')['alphaValidator']
@@ -137,6 +138,7 @@ declare global {
   const storeToRefs: typeof import('pinia')['storeToRefs']
   const syncRef: typeof import('@vueuse/core')['syncRef']
   const syncRefs: typeof import('@vueuse/core')['syncRefs']
+  const tableStatusMeta: typeof import('./resources/js/utils/tableStatuses.js')['tableStatusMeta']
   const templateRef: typeof import('@vueuse/core')['templateRef']
   const throttledRef: typeof import('@vueuse/core')['throttledRef']
   const throttledWatch: typeof import('@vueuse/core')['throttledWatch']
@@ -370,6 +372,7 @@ declare module 'vue' {
     readonly $api: UnwrapRef<typeof import('./resources/js/utils/api.js')['$api']>
     readonly COOKIE_MAX_AGE_1_YEAR: UnwrapRef<typeof import('./resources/js/utils/constants.js')['COOKIE_MAX_AGE_1_YEAR']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
+    readonly TABLE_STATUSES: UnwrapRef<typeof import('./resources/js/utils/tableStatuses.js')['TABLE_STATUSES']>
     readonly acceptHMRUpdate: UnwrapRef<typeof import('pinia')['acceptHMRUpdate']>
     readonly alphaDashValidator: UnwrapRef<typeof import('./resources/js/@core/utils/validators.js')['alphaDashValidator']>
     readonly alphaValidator: UnwrapRef<typeof import('./resources/js/@core/utils/validators.js')['alphaValidator']>
@@ -498,6 +501,7 @@ declare module 'vue' {
     readonly storeToRefs: UnwrapRef<typeof import('pinia')['storeToRefs']>
     readonly syncRef: UnwrapRef<typeof import('@vueuse/core')['syncRef']>
     readonly syncRefs: UnwrapRef<typeof import('@vueuse/core')['syncRefs']>
+    readonly tableStatusMeta: UnwrapRef<typeof import('./resources/js/utils/tableStatuses.js')['tableStatusMeta']>
     readonly templateRef: UnwrapRef<typeof import('@vueuse/core')['templateRef']>
     readonly throttledRef: UnwrapRef<typeof import('@vueuse/core')['throttledRef']>
     readonly throttledWatch: UnwrapRef<typeof import('@vueuse/core')['throttledWatch']>

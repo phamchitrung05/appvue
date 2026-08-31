@@ -9,6 +9,20 @@ export default [
         to: 'apps-ecommerce-dashboard',
       },
       {
+        title: 'Store',
+        children: [
+          { title: 'List', to: 'apps-ecommerce-store-list' },
+          { title: 'Add', to: 'apps-ecommerce-store-add' },
+        ],
+      },
+      {
+        title: 'Area',
+        children: [
+          { title: 'Add Table', to: 'apps-ecommerce-area-add-table' },
+          { title: 'Add Area', to: 'apps-ecommerce-area-add-area' },
+        ],
+      },
+      {
         title: 'Product',
         children: [
           { title: 'List', to: 'apps-ecommerce-product-list' },

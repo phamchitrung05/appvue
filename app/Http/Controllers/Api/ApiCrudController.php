@@ -68,7 +68,13 @@ abstract class ApiCrudController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $perPage = (int) $request->query('per_page', (string) config('repository.pagination.limit', 15));
+        // Ưu tiên `per_page`, dự phòng `itemsPerPage` (tên tham số của VDataTable)
+        $perPage = (int) $request->query('per_page', (string) $request->query('itemsPerPage', (string) config('repository.pagination.limit', 15)));
+
+        // Giá trị âm (thường là -1) nghĩa là "LẤY TẤT CẢ" — bù bằng tổng số
+        // bản ghi để paginate trả về toàn bộ thay vì cắt trang
+        if ($perPage < 1)
+            $perPage = max($this->repository->count(), 1);
 
         return $this->indexResponse($request, $this->repository->paginate($perPage));
     }

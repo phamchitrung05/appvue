@@ -3,13 +3,13 @@
 namespace App\Repositories;
 
 use App\Criteria\DataTableCriteria;
-use App\Models\Store;
+use App\Models\TableZone;
 use Prettus\Repository\Eloquent\BaseRepository;
 
 /**
- * Class StoreRepositoryEloquent.
+ * Class TableZoneRepositoryEloquent.
  */
-class StoreRepositoryEloquent extends BaseRepository implements StoreRepository
+class TableZoneRepositoryEloquent extends BaseRepository implements TableZoneRepository
 {
     /**
      * Danh sách cột được phép tìm kiếm và lọc qua Criteria.
@@ -20,9 +20,7 @@ class StoreRepositoryEloquent extends BaseRepository implements StoreRepository
      */
     protected $fieldSearchable = [
         'name' => 'like',
-        'address' => 'like',
-        'phone' => 'like',
-        'email' => 'like',
+        'store_id',
         'is_active',
     ];
 
@@ -34,9 +32,6 @@ class StoreRepositoryEloquent extends BaseRepository implements StoreRepository
      */
     public $fieldSortable = [
         'name',
-        'address',
-        'phone',
-        'email',
         'is_active',
     ];
 
@@ -47,7 +42,7 @@ class StoreRepositoryEloquent extends BaseRepository implements StoreRepository
      */
     public function model()
     {
-        return Store::class;
+        return TableZone::class;
     }
 
     /**

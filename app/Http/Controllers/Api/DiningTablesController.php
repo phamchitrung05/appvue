@@ -44,16 +44,14 @@ class DiningTablesController extends ApiCrudController
      * danh sách bàn của từng khu, trạng thái bàn suy ra từ dữ liệu thật
      * (không có cột trạng thái riêng trong DB).
      *
-     * Quy tắc suy ra trạng thái:
-     * - Có phiên đang mở (status=open, end_time=null) và phiên có đơn
-     *   chưa thanh toán → 'occupied' (có khách).
-     * - Có phiên đang mở nhưng chưa có đơn → 'ordering' (đang order).
-     * - Không có phiên nhưng có reserved_at → 'reserved' (đã đặt).
-     * - Còn lại → 'available' (trống).
+     * Quy tắc suy ra trạng thái — table_sessions chỉ có 2 trạng thái:
+     * - Có phiên đang mở (status=open, end_time=null) → 'occupied' (có khách),
+     *   bất kể phiên đã có đơn hay chưa.
+     * - Không có phiên đang mở → 'available' (trống).
      *
-     * Thời gian hiển thị: started_at (phiên mở) cho bàn có khách/đang order,
-     * reserved_at (giờ hẹn) cho bàn đã đặt, tổng tiền cộng từ các đơn
-     * không bị huỷ của phiên hiện tại.
+     * Thời gian hiển thị: started_at (phiên mở) cho bàn có khách; tổng tiền
+     * cộng từ các đơn không bị huỷ của phiên hiện tại. reserved_at vẫn trả
+     * kèm để frontend dùng khi cần.
      */
     public function floor(Request $request): JsonResponse
     {
@@ -74,6 +72,8 @@ class DiningTablesController extends ApiCrudController
         $payload = $zones->map(fn (TableZone $zone): array => [
             'id' => $zone->id,
             'name' => $zone->name,
+            // store_id để frontend gán cửa hàng cho bàn mới tạo trong khu
+            'store_id' => $zone->store_id,
             'tables' => $zone->diningTables
                 ->map(fn (DiningTable $table): array => $this->floorTableRow($table))
                 ->all(),
@@ -94,9 +94,7 @@ class DiningTablesController extends ApiCrudController
         $sessionOrders = $activeSession?->orders ?? collect();
 
         [$status, $startedAt] = match (true) {
-            $activeSession !== null && $sessionOrders->isNotEmpty() => ['occupied', $activeSession->start_time],
-            $activeSession !== null => ['ordering', $activeSession->start_time],
-            $table->reserved_at !== null => ['reserved', null],
+            $activeSession !== null => ['occupied', $activeSession->start_time],
             default => ['available', null],
         };
 

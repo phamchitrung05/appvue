@@ -77,24 +77,26 @@ class DiningTableFloorTest extends TestCase
             ->assertJsonPath('data.zones.0.tables.0.started_at', $session->start_time->toISOString());
     }
 
-    public function test_floor_marks_table_with_open_session_without_order_as_ordering(): void
+    public function test_floor_marks_table_with_open_session_without_order_as_occupied(): void
     {
+        // Luật 2 trạng thái: có phiên mở là "có khách", bất kể đã có đơn hay chưa
         $this->openSession($this->createTable($this->createZone()), 15);
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.zones.0.tables.0.status', 'ordering')
+            ->assertJsonPath('data.zones.0.tables.0.status', 'occupied')
             ->assertJsonPath('data.zones.0.tables.0.total', 0);
     }
 
-    public function test_floor_marks_reserved_table_without_session(): void
+    public function test_floor_marks_reserved_table_without_session_as_available(): void
     {
+        // Bàn có giờ hẹn nhưng chưa có phiên mở vẫn là "trống"
         $table = $this->createTable($this->createZone());
         $table->update(['reserved_at' => now()->setTime(14, 0)]);
 
         $this->getJson('/api/v1/dining-tables/floor')
             ->assertOk()
-            ->assertJsonPath('data.zones.0.tables.0.status', 'reserved')
+            ->assertJsonPath('data.zones.0.tables.0.status', 'available')
             ->assertJsonPath('data.zones.0.tables.0.reserved_at', $table->refresh()->reserved_at->toISOString());
     }
 

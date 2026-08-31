@@ -361,6 +361,8 @@
     "watchTriggerable": true,
     "watchWithFilter": true,
     "whenever": true,
-    "validationMessages": true
+    "validationMessages": true,
+    "TABLE_STATUSES": true,
+    "tableStatusMeta": true
   }
 }

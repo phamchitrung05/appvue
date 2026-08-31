@@ -136,10 +136,10 @@ const selectedGroupName = computed(() => {
 })
 
 // ==================== Đếm sản phẩm theo nhóm ====================
-// Lấy TẤT CẢ sản phẩm (itemsPerPage=-1) rồi đếm client-side — đủ dùng với
-// quy mô hiện tại; khi catalog lớn nên thay bằng endpoint đếm riêng.
+// Lấy TẤT CẢ sản phẩm (per_page=-1 — backend bù bằng tổng số bản ghi) rồi
+// đếm client-side; khi catalog lớn nên thay bằng endpoint đếm riêng.
 const { data: allProductsData, execute: fetchAllProducts } = await useApi(createUrl('/v1/products', {
-  query: { itemsPerPage: -1 },
+  query: { per_page: -1 },
 }))
 
 const totalAllProducts = computed(() => allProductsData.value?.total ?? 0)
