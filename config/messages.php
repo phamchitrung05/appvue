@@ -45,6 +45,7 @@ return [
         'ProductGroup' => 'nhóm sản phẩm',
         'Store' => 'cửa hàng',
         'DiningTable' => 'bàn ăn',
+        'TableZone' => 'khu vực bàn',
         'Order' => 'đơn hàng',
         'OrderItem' => 'món trong đơn',
         'Payment' => 'thanh toán',

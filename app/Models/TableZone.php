@@ -30,6 +30,16 @@ class TableZone extends Model implements Transformable
     ];
 
     /**
+     * Giá trị mặc định khi tạo mới — cột is_active là NOT NULL không có
+     * default ở DB nên phải có mặt trong mọi câu INSERT.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'is_active' => true,
+    ];
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

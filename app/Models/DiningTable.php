@@ -36,9 +36,19 @@ class DiningTable extends Model implements Transformable
      */
     protected $fillable = [
         'name',
+        'status',
         'zone_id',
         'reserved_at',
         'store_id',
+    ];
+
+    /**
+     * Giá trị mặc định khi tạo mới — bàn mới luôn khởi đầu là "trống".
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => 'available',
     ];
 
     /**

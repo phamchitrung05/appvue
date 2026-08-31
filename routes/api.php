@@ -17,9 +17,6 @@ Route::prefix('v1')->group(function () {
     Route::apiResource('table-zones', TableZonesController::class);
     Route::apiResource('product-groups', ProductGroupsController::class);
     Route::apiResource('products', ProductsController::class);
-    // Sơ đồ bàn cho màn hình Order/List — phải đăng ký TRƯỚC apiResource
-    // để 'floor' không bị tham số {dining_table} của route show nuốt mất.
-    Route::get('dining-tables/floor', [DiningTablesController::class, 'floor']);
     Route::apiResource('dining-tables', DiningTablesController::class);
     Route::apiResource('table-sessions', TableSessionsController::class);
     Route::apiResource('orders', OrdersController::class);

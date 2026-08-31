@@ -15,14 +15,14 @@ class ProductRepositoryEloquent extends BaseRepository implements ProductReposit
      * Danh sách cột được phép tìm kiếm và lọc qua Criteria.
      *
      * Cột khai báo `like` sẽ tìm gần đúng, các cột còn lại so sánh bằng.
+     * Hộp tìm kiếm chung (tham số `q`) chỉ quét các cột `like` (DataTableCriteria
+     * tự dựng `searchFields`); cột `=` chỉ đóng vai trò bộ lọc riêng theo cột.
      *
      * @var array
      */
     protected $fieldSearchable = [
         'name' => 'like',
-        'description' => 'like',
-        'product_group_id',
-        'is_active',
+        'price' => 'like',
     ];
 
     /**
@@ -37,9 +37,7 @@ class ProductRepositoryEloquent extends BaseRepository implements ProductReposit
      */
     public $fieldSortable = [
         'name',
-        'product_group_id',
         'price',
-        'is_active',
     ];
 
     /**

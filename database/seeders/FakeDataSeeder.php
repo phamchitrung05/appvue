@@ -272,6 +272,8 @@ class FakeDataSeeder extends Seeder
                     'end_time' => null,
                     'status' => 'open',
                 ]);
+
+                DiningTable::where('id', $table->id)->update(['status' => 'occupied']);
             } elseif ($pattern === 2 || $pattern === 3) {
                 TableSession::create([
                     'dining_table_id' => $table->id,
@@ -279,8 +281,19 @@ class FakeDataSeeder extends Seeder
                     'end_time' => null,
                     'status' => 'open',
                 ]);
+
+                DiningTable::where('id', $table->id)->update(['status' => 'occupied']);
             }
         }
+
+        // Đồng bộ cột status với mọi bàn đang có phiên mở (phòng khi dữ liệu
+        // cũ đã có phiên mở từ trước khi thêm cột status).
+        $openSessionTableIds = TableSession::query()
+            ->where('status', 'open')
+            ->whereNull('end_time')
+            ->pluck('dining_table_id');
+
+        DiningTable::query()->whereIn('id', $openSessionTableIds)->update(['status' => 'occupied']);
 
         // Bổ sung phiên đóng (lịch sử) tới đủ 20 dòng
         while (TableSession::count() < $this->minRows) {

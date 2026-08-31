@@ -21,7 +21,8 @@ class TableZonesController extends ApiCrudController
     protected function createRules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
+            // max:100 khớp độ rộng cột name VARCHAR(100) của bảng table_zones.
+            'name' => ['required', 'string', 'max:100'],
             'store_id' => ['nullable', 'integer', 'exists:store,id'],
             'is_active' => ['nullable', 'boolean'],
         ];
@@ -30,7 +31,7 @@ class TableZonesController extends ApiCrudController
     protected function updateRules(): array
     {
         return [
-            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'name' => ['sometimes', 'required', 'string', 'max:100'],
             'store_id' => ['sometimes', 'nullable', 'integer', 'exists:store,id'],
             'is_active' => ['sometimes', 'nullable', 'boolean'],
         ];

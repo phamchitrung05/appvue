@@ -31,7 +31,7 @@ class DataTableCriteria extends RequestCriteria
      * Ánh xạ tham số của Vuetify rồi giao phần dựng truy vấn cho RequestCriteria.
      *
      * Các bước:
-     * 1. `q` -> `search` để tìm kiếm theo `$fieldSearchable` của repository.
+     * 1. `q` -> `search` để tìm kiếm theo các cột `like` của `$fieldSearchable`.
      * 2. `sortBy` -> `orderBy` (tên cột) và `orderBy` -> `sortedBy` (chiều sắp xếp).
      * 3. Nếu chỉ có chiều sắp xếp mà không có cột thì xoá `orderBy` đi để tránh
      *    việc RequestCriteria sắp xếp theo một cột tên là "asc"/"desc".
@@ -50,7 +50,7 @@ class DataTableCriteria extends RequestCriteria
         // trở thành request cũ — sort/lọc sẽ nhận tham số của request trước.
         $this->request = app(Request::class);
 
-        $this->mapSearchParam();
+        $this->mapSearchParam($repository);
         $this->mapSortParams($repository);
 
         $model = parent::apply($model, $repository);
@@ -114,14 +114,37 @@ class DataTableCriteria extends RequestCriteria
      *
      * Chỉ ghi đè khi `q` có giá trị thực, để request nào đã gửi sẵn `search`
      * vẫn hoạt động bình thường.
+     *
+     * Ngoài ra tự dựng `searchFields` chỉ gồm các cột khai báo điều kiện
+     * `like`/`ilike` trong `$fieldSearchable`: hộp tìm kiếm chung phải quét
+     * TOÀN BỘ cột văn bản/số (name, description, price, image_url...) theo
+     * kiểu OR, còn các cột điều kiện `=` (khóa liên kết, boolean) chỉ dùng
+     * làm bộ lọc riêng — nếu kéo vào search thì trên MySQL `is_active = 'abc'`
+     * sẽ ép kiểu về 0 và khớp nhầm toàn bộ bản ghi.
      */
-    protected function mapSearchParam(): void
+    protected function mapSearchParam(RepositoryInterface $repository): void
     {
         if (! $this->request->filled('q')) {
             return;
         }
 
         $this->request->query->set('search', (string) $this->request->query('q'));
+
+        // Request đã chủ động gửi searchFields thì tôn trọng, không ghi đè.
+        if ($this->request->filled('searchFields')) {
+            return;
+        }
+
+        $likeFields = collect((array) $repository->getFieldsSearchable())
+            ->filter(fn ($condition, $field): bool => ! is_int($field)
+                && in_array(strtolower(trim((string) $condition)), ['like', 'ilike'], true))
+            ->keys()
+            ->implode(';');
+
+        if ($likeFields !== '') {
+            $this->request->query->set('searchFields', $likeFields);
+            $this->request->query->set('searchJoin', 'or');
+        }
     }
 
     /**

@@ -70,7 +70,7 @@ class ApiCrudTest extends TestCase
     {
         $this->getJson('/api/v1/stores')
             ->assertOk()
-            ->assertJsonStructure(['data', 'current_page', 'per_page', 'total']);
+            ->assertJsonStructure(['data' => ['data', 'page', 'per_page', 'total', 'last_page']]);
 
         $created = $this->postJson('/api/v1/stores', [
             'name' => 'Chi nhánh Quận 1',
@@ -175,6 +175,31 @@ class ApiCrudTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.name', 'Bàn VIP 2');
         $this->deleteJson("/api/v1/dining-tables/{$id}")->assertNoContent();
+    }
+
+    public function test_dining_table_status_validation_and_default(): void
+    {
+        // Tạo mới KHÔNG gửi status → mặc định 'available' (bàn trống).
+        $created = $this->postJson('/api/v1/dining-tables', ['name' => 'Bàn 01'])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'available');
+
+        $id = $created->json('data.id');
+
+        // Đổi trạng thái hợp lệ.
+        $this->putJson("/api/v1/dining-tables/{$id}", ['status' => 'occupied'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'occupied');
+
+        // Trạng thái lạ bị chặn 422 thay vì lưu vào DB.
+        $this->putJson("/api/v1/dining-tables/{$id}", ['status' => 'dang_don_dep'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['status']);
+
+        // Lọc danh sách theo status hoạt động (status nằm trong $fieldSearchable).
+        $this->getJson('/api/v1/dining-tables?status=occupied')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.data');
     }
 
     public function test_table_session_crud_lifecycle(): void
@@ -313,23 +338,25 @@ class ApiCrudTest extends TestCase
         Product::create(['name' => 'Espresso', 'price' => 40000, 'product_group_id' => $group->id]);
         Product::create(['name' => 'Latte', 'price' => 50000, 'product_group_id' => $group->id]);
 
+        // Product luôn trả shape datatable (ProductsController override
+        // indexResponse), kể cả khi phân trang bằng per_page.
         $this->getJson('/api/v1/products?per_page=2')
             ->assertOk()
-            ->assertJsonPath('per_page', 2)
-            ->assertJsonPath('total', 3)
-            ->assertJsonCount(2, 'data');
+            ->assertJsonPath('data.itemsPerPage', 2)
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonCount(2, 'data.products');
 
         $this->getJson('/api/v1/products?search=Latte')
             ->assertOk()
-            ->assertJsonPath('total', 1)
-            ->assertJsonPath('data.0.name', 'Latte');
+            ->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.products.0.name', 'Latte');
     }
 
     public function test_missing_record_returns_json_404(): void
     {
         $this->getJson('/api/v1/stores/424242')
             ->assertNotFound()
-            ->assertJsonPath('message', 'Store not found.');
+            ->assertJsonPath('code', 'STORE_NOT_FOUND');
 
         $this->putJson('/api/v1/stores/424242', ['name' => 'X'])->assertNotFound();
         $this->deleteJson('/api/v1/stores/424242')->assertNotFound();
@@ -350,13 +377,13 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?itemsPerPage=2&page=1')
             ->assertOk()
-            ->assertJsonStructure(['products', 'total', 'page', 'itemsPerPage', 'lastPage'])
-            ->assertJsonMissingPath('data')
-            ->assertJsonCount(2, 'products')
-            ->assertJsonPath('total', 3)
-            ->assertJsonPath('page', 1)
-            ->assertJsonPath('itemsPerPage', 2)
-            ->assertJsonPath('lastPage', 2);
+            ->assertJsonStructure(['data' => ['products', 'total', 'page', 'itemsPerPage', 'lastPage']])
+            ->assertJsonMissingPath('data.data')
+            ->assertJsonCount(2, 'data.products')
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.page', 1)
+            ->assertJsonPath('data.itemsPerPage', 2)
+            ->assertJsonPath('data.lastPage', 2);
     }
 
     public function test_data_table_format_can_be_requested_explicitly(): void
@@ -365,8 +392,8 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?format=datatable')
             ->assertOk()
-            ->assertJsonCount(3, 'products')
-            ->assertJsonPath('total', 3);
+            ->assertJsonCount(3, 'data.products')
+            ->assertJsonPath('data.total', 3);
     }
 
     public function test_data_table_index_keeps_total_across_pages(): void
@@ -375,9 +402,9 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?itemsPerPage=2&page=2')
             ->assertOk()
-            ->assertJsonCount(1, 'products')
-            ->assertJsonPath('total', 3)
-            ->assertJsonPath('page', 2);
+            ->assertJsonCount(1, 'data.products')
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.page', 2);
     }
 
     public function test_data_table_index_maps_q_to_the_search_criteria(): void
@@ -386,8 +413,26 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?itemsPerPage=10&q=Latte')
             ->assertOk()
-            ->assertJsonPath('total', 1)
-            ->assertJsonPath('products.0.name', 'Latte');
+            ->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.products.0.name', 'Latte');
+    }
+
+    public function test_data_table_index_searches_across_all_like_fields(): void
+    {
+        $this->seedThreeProducts();
+
+        // Ô tìm kiếm chung quét mọi cột like: cả cột số (price) phải khớp
+        // được, không chỉ name/description.
+        $this->getJson('/api/v1/products?itemsPerPage=10&q=30000')
+            ->assertOk()
+            ->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.products.0.name', 'Bạc xỉu');
+
+        // Cột điều kiện '=' (is_active, product_group_id) KHÔNG tham gia
+        // search: chuỗi ký tự bất kỳ không được khớp nhầm boolean trên MySQL.
+        $this->getJson('/api/v1/products?itemsPerPage=10&q=zzz_khong_ton_tai')
+            ->assertOk()
+            ->assertJsonPath('data.total', 0);
     }
 
     public function test_data_table_index_maps_sort_by_and_order_by(): void
@@ -434,9 +479,9 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?itemsPerPage=-1')
             ->assertOk()
-            ->assertJsonCount(3, 'products')
-            ->assertJsonPath('total', 3)
-            ->assertJsonPath('lastPage', 1);
+            ->assertJsonCount(3, 'data.products')
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.lastPage', 1);
     }
 
     public function test_data_table_index_returns_an_empty_list_when_no_rows_match(): void
@@ -445,32 +490,43 @@ class ApiCrudTest extends TestCase
 
         $this->getJson('/api/v1/products?itemsPerPage=10&q=KhongTonTai')
             ->assertOk()
-            ->assertJsonPath('products', [])
-            ->assertJsonPath('total', 0);
+            ->assertJsonPath('data.products', [])
+            ->assertJsonPath('data.total', 0);
     }
 
     public function test_data_table_items_key_is_camel_cased_plural_of_the_model(): void
     {
         $store = $this->createStore();
 
+        // Product là resource duy nhất override indexResponse sang shape
+        // datatable — key items là số nhiều camel case của model.
+        $this->getJson('/api/v1/products?itemsPerPage=10')
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['products', 'total']]);
+
+        // Các resource còn lại trả shape chuẩn hoá mặc định (dòng ở data.data).
         $this->getJson('/api/v1/dining-tables?itemsPerPage=10')
             ->assertOk()
-            ->assertJsonStructure(['diningTables', 'total']);
+            ->assertJsonStructure(['data' => ['data', 'page']]);
 
         $this->createTableSession($this->createDiningTable($store));
 
         $this->getJson('/api/v1/table-sessions?itemsPerPage=10')
             ->assertOk()
-            ->assertJsonStructure(['tableSessions', 'total']);
+            ->assertJsonStructure(['data' => ['data', 'page']]);
     }
 
     public function test_index_still_returns_the_paginator_shape_without_data_table_params(): void
     {
-        $this->seedThreeProducts();
+        $store = $this->createStore();
+        Store::create(['name' => 'Chi nhánh 2', 'is_active' => true]);
 
-        $this->getJson('/api/v1/products?per_page=2')
+        // Store không override indexResponse — luôn là shape mặc định chuẩn
+        // hoá, không bao giờ có key products của shape datatable.
+        $this->getJson('/api/v1/stores?per_page=2')
             ->assertOk()
-            ->assertJsonStructure(['data', 'current_page', 'per_page', 'total'])
-            ->assertJsonMissingPath('products');
+            ->assertJsonStructure(['data' => ['data', 'page', 'per_page', 'total', 'last_page']])
+            ->assertJsonCount(2, 'data.data')
+            ->assertJsonMissingPath('data.products');
     }
 }

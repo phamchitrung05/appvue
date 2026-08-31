@@ -16,9 +16,10 @@ use Prettus\Repository\Contracts\RepositoryInterface;
  * Các subclass chỉ cần khai báo repository interface và rules validate.
  *
  * Điểm mở rộng chính: index() tách phần logic chung (criteria, per_page,
- * paginate) khỏi phần DỰNG RESPONSE. Việc dựng response được ủy thác cho
- * hook indexResponse() — subclass override hook này khi muốn shape dữ liệu
- * riêng cho từng model (datatable Vuetify, phân trang, gom nhóm, ...).
+ * paginate) khỏi phần DỰNG RESPONSE. Mặc định data bọc trong envelope chuẩn
+ * của BaseResponseService với các key thống nhất (data, total, page, per_page,
+ * last_page); subclass override hook indexResponse() khi muốn shape dữ liệu
+ * khác cho riêng mình (vd datatable Vuetify của ProductsController).
  */
 abstract class ApiCrudController extends Controller
 {
@@ -73,8 +74,9 @@ abstract class ApiCrudController extends Controller
 
         // Giá trị âm (thường là -1) nghĩa là "LẤY TẤT CẢ" — bù bằng tổng số
         // bản ghi để paginate trả về toàn bộ thay vì cắt trang
-        if ($perPage < 1)
+        if ($perPage < 1) {
             $perPage = max($this->repository->count(), 1);
+        }
 
         return $this->indexResponse($request, $this->repository->paginate($perPage));
     }
@@ -82,15 +84,29 @@ abstract class ApiCrudController extends Controller
     /**
      * HOOK dựng response cho index() — override ở subclass khi cần shape riêng.
      *
-     * Mặc định trả shape phân trang gốc của Laravel (current_page, data,
-     * total, per_page...) — phù hợp danh sách cuộn vô hạn (vd: Order).
+     * Mặc định trả data chuẩn hoá bọc trong envelope của BaseResponseService:
+     * { data: [...dòng trang hiện tại], total, page, per_page, last_page }.
+     * Các controller muốn shape khác (vd datatable Vuetify với key danh sách
+     * riêng như `products`) chỉ cần override method này trong class của mình.
      *
      * @param  Request  $request  Request gốc (đọc thêm tham số nếu cần).
      * @param  LengthAwarePaginator  $paginator  Kết quả paginate() từ repository.
      */
     protected function indexResponse(Request $request, LengthAwarePaginator $paginator): JsonResponse
     {
-        return $this->responder->success($paginator->toArray());
+        return $this->responder->success([
+            // Danh sách bản ghi của trang hiện tại — các store/trang frontend
+            // đọc ở đường `data.data` sau khi useApi bóc envelope.
+            'data' => collect($paginator->items())->values()->all(),
+            // Tổng số bản ghi toàn bộ (chưa phân trang).
+            'total' => $paginator->total(),
+            // Trang hiện tại (bắt đầu từ 1).
+            'page' => $paginator->currentPage(),
+            // Số bản ghi mỗi trang.
+            'per_page' => (int) $paginator->perPage(),
+            // Tổng số trang.
+            'last_page' => $paginator->lastPage(),
+        ]);
     }
 
     /**
