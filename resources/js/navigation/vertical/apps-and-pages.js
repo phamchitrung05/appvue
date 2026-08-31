@@ -9,6 +9,11 @@ export default [
         to: 'apps-ecommerce-dashboard',
       },
       {
+        // Màn hình sơ đồ bàn cho thu ngân — bấm bàn để order/thanh toán.
+        title: 'Thu Ngân',
+        to: 'apps-ecommerce-cashier',
+      },
+      {
         title: 'Store',
         children: [
           { title: 'List', to: 'apps-ecommerce-store-list' },
@@ -18,7 +23,6 @@ export default [
       {
         title: 'Area',
         children: [
-          { title: 'Add Table', to: 'apps-ecommerce-area-add-table' },
           { title: 'Add Area', to: 'apps-ecommerce-area-add-area' },
         ],
       },

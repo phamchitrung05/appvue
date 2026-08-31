@@ -1,11 +1,19 @@
 <script setup>
+import { useStoreStore } from '@/store/useStoreStore'
+import { useTableZoneStore } from '@/store/useTableZoneStore'
 import { validationMessages } from '@/utils/validationMessages'
+
+const tableZoneStore = useTableZoneStore()
+const storeStore = useStoreStore()
 
 const router = useRouter()
 
 const isSubmitting = ref(false)
 const formRef = ref()
-const snackbar = ref({ show: false, message: '', color: 'error' })
+
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 const form = ref({
   name: '',
@@ -22,18 +30,13 @@ const storeRules = [
   value => value !== null && value !== undefined || validationMessages.area.storeRequired,
 ]
 
-// Cửa hàng cho select: khu luôn thuộc một cửa hàng (table_zones.store_id)
-const { data: storesData } = await useApi(createUrl('/v1/stores', {
-  query: { per_page: 100, sortBy: 'name', orderBy: 'asc' },
-}))
+// Cửa hàng cho select: khu luôn thuộc một cửa hàng — đọc từ Pinia store
+// (tự nạp lần đầu qua ensureLoaded), vào lại trang dùng ngay cache.
+await storeStore.ensureLoaded()
 
 const storeOptions = computed(() =>
-  (storesData.value?.data ?? []).map(store => ({ title: store.name, value: store.id })),
+  storeStore.stores.map(store => ({ title: store.name, value: store.id })),
 )
-
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
 
 const submitArea = async () => {
   const { valid } = await formRef.value.validate()
@@ -43,42 +46,25 @@ const submitArea = async () => {
 
   isSubmitting.value = true
 
-  // statusCode/error là REF (xem ghi chú ở trang thêm sản phẩm)
-  const { error, statusCode } = await useApi('/v1/table-zones', {
-    method: 'POST',
-    body: {
-      name: form.value.name.trim(),
-      store_id: form.value.store_id,
-      is_active: form.value.is_active,
-    },
-  }).json()
+  // Ghi data đi qua store — store tự gọi API và chèn khu mới vào đầu state
+  const result = await tableZoneStore.createTableZone({
+    name: form.value.name.trim(),
+    store_id: form.value.store_id,
+    is_active: form.value.is_active,
+  })
 
   isSubmitting.value = false
 
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
-    showSnackbar(validationMessages.area.createSuccess, 'success')
+  if (result.ok) {
+    showSnackbar(validationMessages.area.createSuccess)
 
     // Khu mới xong — sang sơ đồ bàn để thêm bàn vào khu vừa tạo
-    setTimeout(() => router.push('/apps/ecommerce/area/add-table'), 900)
+    setTimeout(() => router.push('/apps/ecommerce/cashier'), 900)
 
     return
   }
 
-  let message = validationMessages.area.createFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.area.createFailed)
 }
 </script>
 
@@ -126,7 +112,7 @@ const submitArea = async () => {
             variant="tonal"
             color="secondary"
             :disabled="isSubmitting"
-            @click="router.push('/apps/ecommerce/area/add-table')"
+            @click="router.push('/apps/ecommerce/cashier')"
           >
             Quay lại sơ đồ bàn
           </VBtn>
@@ -140,13 +126,5 @@ const submitArea = async () => {
         </VCardActions>
       </VForm>
     </VCard>
-
-    <VSnackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      location="top"
-    >
-      {{ snackbar.message }}
-    </VSnackbar>
   </div>
 </template>

@@ -1,9 +1,7 @@
 <script setup>
+import { useProductGroupStore } from '@/store/useProductGroupStore'
 import { validationMessages } from '@/utils/validationMessages'
 
-// Dialog sửa nhóm hàng: nhận `group` (bản ghi hiện tại) + v-model điều
-// khiển mở/đóng. Lưu thành công emit `saved` kèm bản ghi đã cập nhật để
-// trang cha phản ánh ngay vào danh sách.
 const props = defineProps({
   group: {
     type: Object,
@@ -17,9 +15,18 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'saved'])
 
+// Dialog sửa nhóm hàng: nhận `group` (bản ghi hiện tại) + v-model điều
+// khiển mở/đóng. Lưu thành công emit `saved` kèm bản ghi đã cập nhật —
+// ghi data đi qua store, store tự vá state theo id.
+
+const productGroupStore = useProductGroupStore()
+
 const isSubmitting = ref(false)
 const formRef = ref()
-const snackbar = ref({ show: false, message: '', color: 'error' })
+
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 const form = ref({
   name: '',
@@ -42,10 +49,6 @@ watch(() => props.modelValue, isOpen => {
 
 const close = () => emit('update:modelValue', false)
 
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
-
 const submitGroup = async () => {
   const { valid } = await formRef.value.validate()
 
@@ -54,40 +57,22 @@ const submitGroup = async () => {
 
   isSubmitting.value = true
 
-  // statusCode/error là REF (xem ghi chú ở trang thêm sản phẩm)
-  const { data, error, statusCode } = await useApi(`/v1/product-groups/${props.group.id}`, {
-    method: 'PUT',
-    body: {
-      name: form.value.name.trim(),
-      is_active: form.value.is_active,
-    },
-  }).json()
+  const result = await productGroupStore.updateProductGroup(props.group.id, {
+    name: form.value.name.trim(),
+    is_active: form.value.is_active,
+  })
 
   isSubmitting.value = false
 
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
+  if (result.ok) {
     close()
-    showSnackbar(validationMessages.productGroup.updateSuccess, 'success')
-    emit('saved', data.value)
+    showSnackbar(validationMessages.productGroup.updateSuccess)
+    emit('saved', result.record)
 
     return
   }
 
-  let message = validationMessages.productGroup.updateFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.productGroup.updateFailed)
 }
 </script>
 
@@ -141,12 +126,4 @@ const submitGroup = async () => {
       </VForm>
     </VCard>
   </VDialog>
-
-  <VSnackbar
-    v-model="snackbar.show"
-    :color="snackbar.color"
-    location="top"
-  >
-    {{ snackbar.message }}
-  </VSnackbar>
 </template>

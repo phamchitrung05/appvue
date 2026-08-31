@@ -1,11 +1,15 @@
 <script setup>
+import { useProductGroupStore } from '@/store/useProductGroupStore'
 import { validationMessages } from '@/utils/validationMessages'
+
+const emit = defineEmits(['created'])
 
 // Component tự chứa: nút dấu + mở dialog thêm nhanh nhóm hàng.
 // Sau khi tạo thành công sẽ emit `created` kèm bản ghi nhóm mới để trang
-// cha tải lại danh sách option (và tự chọn nếu muốn).
+// cha làm tiếp (chọn nhóm, gán sort_order...). Ghi data đi qua store —
+// store tự gọi API và chèn bản ghi vào đầu state.
 
-const emit = defineEmits(['created'])
+const productGroupStore = useProductGroupStore()
 
 // Cho phép trang cha truyền class/style vào nút + (vd căn hàng khi select có label)
 defineOptions({ inheritAttrs: false })
@@ -13,7 +17,10 @@ defineOptions({ inheritAttrs: false })
 const isDialogOpen = ref(false)
 const isSubmitting = ref(false)
 const formRef = ref()
-const snackbar = ref({ show: false, message: '', color: 'error' })
+
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 const form = ref({
   // name bắt buộc ≤255 (createRules của ProductGroupsController);
@@ -26,10 +33,6 @@ const nameRules = [
   value => !!value?.trim() || validationMessages.productGroup.nameRequired,
   value => (value?.trim().length || 0) <= 255 || validationMessages.productGroup.nameMax,
 ]
-
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
 
 const openDialog = () => {
   form.value.name = ''
@@ -45,40 +48,22 @@ const submitGroup = async () => {
 
   isSubmitting.value = true
 
-  // statusCode/error là REF (xem ghi chú ở trang thêm sản phẩm)
-  const { data, error, statusCode } = await useApi('/v1/product-groups', {
-    method: 'POST',
-    body: {
-      name: form.value.name.trim(),
-      is_active: form.value.is_active,
-    },
-  }).json()
+  const result = await productGroupStore.createProductGroup({
+    name: form.value.name.trim(),
+    is_active: form.value.is_active,
+  })
 
   isSubmitting.value = false
 
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
+  if (result.ok) {
     isDialogOpen.value = false
-    showSnackbar(validationMessages.productGroup.createSuccess, 'success')
-    emit('created', data.value)
+    showSnackbar(validationMessages.productGroup.createSuccess)
+    emit('created', result.record)
 
     return
   }
 
-  let message = validationMessages.productGroup.createFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.productGroup.createFailed)
 }
 </script>
 
@@ -150,12 +135,4 @@ const submitGroup = async () => {
       </VForm>
     </VCard>
   </VDialog>
-
-  <VSnackbar
-    v-model="snackbar.show"
-    :color="snackbar.color"
-    location="top"
-  >
-    {{ snackbar.message }}
-  </VSnackbar>
 </template>

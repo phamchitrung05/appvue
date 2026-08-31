@@ -1,24 +1,25 @@
 <script setup>
+import { storeToRefs } from 'pinia'
+import { useDiningTableStore } from '@/store/useDiningTableStore'
+import { useProductGroupStore } from '@/store/useProductGroupStore'
+import { useProductStore } from '@/store/useProductStore'
 import { TABLE_STATUSES, tableStatusMeta } from '@/utils/tableStatuses'
 
 const router = useRouter()
 const route = useRoute()
 
 // ==================== Bàn đang order ====================
-// Đọc ?table=<id> từ sơ đồ bàn, tra tên + trạng thái qua API floor
-const { data: floorData } = await useApi('/v1/dining-tables/floor')
+// Đọc ?table=<id> từ sơ đồ bàn, tra tên bàn qua Pinia store (không gọi API —
+// endpoint floor đã bỏ; trạng thái chỉ là available/occupied nên không cần
+// dữ liệu phiên ở đây).
+const diningTableStore = useDiningTableStore()
 
-const table = computed(() => {
-  const tableId = Number(route.query.table)
+const { diningTables } = storeToRefs(diningTableStore)
 
-  for (const zone of (floorData.value?.zones ?? [])) {
-    const found = zone.tables.find(item => item.id === tableId)
-    if (found)
-      return found
-  }
+await diningTableStore.ensureLoaded()
 
-  return null
-})
+const table = computed(() =>
+  diningTables.value.find(item => item.id === Number(route.query.table)) ?? null)
 
 // Đồng hồ giờ hiện tại (HH:MM) trên tiêu đề
 const now = useNow({ interval: 30000 })
@@ -27,29 +28,30 @@ const currentTime = computed(() =>
   now.value.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false }))
 
 // ==================== Danh mục nhóm hàng ====================
-const { data: groupsData } = await useApi(createUrl('/v1/product-groups', {
-  query: { per_page: 100, sortBy: 'sort_order', orderBy: 'asc' },
-}))
+// Nhóm + sản phẩm đọc từ Pinia store (tự nạp lần đầu qua ensureLoaded) —
+// không gọi API riêng nữa, vào lại trang dùng ngay cache.
+const productGroupStore = useProductGroupStore()
+const productStore = useProductStore()
+
+await Promise.all([
+  productGroupStore.ensureLoaded(),
+  productStore.ensureLoaded(),
+])
 
 // Nhóm có sort_order (0/null = chưa xếp) hiển thị trước, chưa xếp xuống cuối
 const groups = computed(() => {
-  const list = groupsData.value?.data ?? []
+  const list = productGroupStore.productGroups
   const ordered = list.filter(group => group.sort_order).sort((a, b) => a.sort_order - b.sort_order)
   const unordered = list.filter(group => !group.sort_order)
 
   return [...ordered, ...unordered]
 })
 
-// Đếm sản phẩm theo nhóm: lấy tất cả (per_page=-1 — backend bù tổng số
-// bản ghi) rồi đếm client-side
-const { data: allProductsData } = await useApi(createUrl('/v1/products', {
-  query: { per_page: -1 },
-}))
-
+// Đếm sản phẩm theo nhóm từ state product của Pinia
 const countByGroup = computed(() => {
   const counts = {}
 
-  for (const product of (allProductsData.value?.products ?? []))
+  for (const product of productStore.products)
     counts[product.product_group_id] = (counts[product.product_group_id] ?? 0) + 1
 
   return counts
@@ -152,10 +154,9 @@ const focusNote = () => {
   input?.focus()
 }
 
-const snackbar = ref({ show: false, message: '', color: 'warning' })
-
+// Toast toàn cục: cảnh báo "chưa kết nối" dùng kind warning (góc trên phải)
 const notifyNotConnected = action => {
-  snackbar.value = { show: true, message: `${action} — sẽ kết nối API đơn hàng sau.`, color: 'warning' }
+  notify.warning(`${action} — sẽ kết nối API đơn hàng sau.`)
 }
 
 const handleShortcut = event => {
@@ -477,14 +478,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleShortcut))
         </div>
       </VCol>
     </VRow>
-
-    <VSnackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      location="top"
-    >
-      {{ snackbar.message }}
-    </VSnackbar>
   </div>
 </template>
 

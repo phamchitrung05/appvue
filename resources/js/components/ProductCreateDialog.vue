@@ -1,4 +1,6 @@
 <script setup>
+import { useProductGroupStore } from '@/store/useProductGroupStore'
+import { useProductStore } from '@/store/useProductStore'
 import { validationMessages } from '@/utils/validationMessages'
 
 // Dialog thêm nhanh sản phẩm — field khớp trang product/add:
@@ -19,7 +21,7 @@ defineOptions({ inheritAttrs: false })
 const isDialogOpen = ref(false)
 const isSubmitting = ref(false)
 const formRef = ref()
-const snackbar = ref({ show: false, message: '', color: 'error' })
+
 
 const form = ref({
   name: '',
@@ -42,18 +44,21 @@ const priceRules = [
   value => Number(value) >= 0 || validationMessages.product.priceMin,
 ]
 
-// Danh sách nhóm cho select (gọi một lần khi component mount)
-const { data: groupsData } = await useApi(createUrl('/v1/product-groups', {
-  query: { per_page: 100 },
-}))
+// Danh sách nhóm cho select đọc từ Pinia store — store tự nạp lần đầu qua
+// ensureLoaded, dialog KHÔNG tự gọi API product-groups (trước đây mỗi lần
+// mount lại phát sinh thêm một request trùng với store của trang cha).
+const productGroupStore = useProductGroupStore()
+const productStore = useProductStore()
 
 const productGroups = computed(() =>
-  (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
+  productGroupStore.productGroups.map(group => ({ title: group.name, value: group.id })),
 )
 
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
+await productGroupStore.ensureLoaded()
+
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 const openDialog = () => {
   form.value = {
@@ -85,37 +90,20 @@ const submitProduct = async () => {
 
   isSubmitting.value = true
 
-  // statusCode/error là REF (xem ghi chú ở trang thêm sản phẩm)
-  const { data, error, statusCode } = await useApi('/v1/products', {
-    method: 'POST',
-    body: buildPayload(),
-  }).json()
+  // Ghi data đi qua store — store tự gọi API và vá state (prependRecord).
+  const result = await productStore.createProduct(buildPayload())
 
   isSubmitting.value = false
 
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
+  if (result.ok) {
     isDialogOpen.value = false
-    showSnackbar(validationMessages.product.createSuccess.replace(':name', data.value?.name ?? ''), 'success')
-    emit('created', data.value)
+    showSnackbar(validationMessages.product.createSuccess.replace(':name', result.record?.name ?? ''))
+    emit('created', result.record)
 
     return
   }
 
-  let message = validationMessages.product.createFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.product.createFailed)
 }
 </script>
 
@@ -230,12 +218,4 @@ const submitProduct = async () => {
       </VForm>
     </VCard>
   </VDialog>
-
-  <VSnackbar
-    v-model="snackbar.show"
-    :color="snackbar.color"
-    location="top"
-  >
-    {{ snackbar.message }}
-  </VSnackbar>
 </template>

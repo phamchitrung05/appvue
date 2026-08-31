@@ -1,4 +1,7 @@
 <script setup>
+import { useProductGroupStore } from '@/store/useProductGroupStore'
+import { useProductStore } from '@/store/useProductStore'
+
 const selectedStatus = ref(null) // lọc is_active: null | true | false
 const selectedCategory = ref() // lọc theo product_group_id
 const searchQuery = ref('')
@@ -32,22 +35,23 @@ const status = ref([
 ])
 
 // ==================== Danh sách nhóm sản phẩm ====================
-// Gọi endpoint thật /v1/product-groups để lọc Category + hiển thị tên nhóm.
-const {
-  data: groupsData,
-  execute: fetchGroups,
-} = await useApi(createUrl('/v1/product-groups', {
-  query: { per_page: 100 },
-}))
+// Danh sách nhóm đọc từ Pinia store (store tự nạp lần đầu qua ensureLoaded) —
+// dùng cho lọc Category + hiển thị tên nhóm, không gọi API riêng nữa.
+const productGroupStore = useProductGroupStore()
+const productStore = useProductStore()
+
+await productGroupStore.ensureLoaded()
+
+const groupList = computed(() => productGroupStore.productGroups)
 
 // Biến danh sách nhóm thành options cho AppSelect: { title: tên, value: id }
 const categories = computed(() =>
-  (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
+  groupList.value.map(group => ({ title: group.name, value: group.id })),
 )
 
 // Map product_group_id -> tên nhóm để hiển thị cột Nhóm hàng
 const groupName = groupId =>
-  groupsData.value?.data?.find(group => group.id === groupId)?.name ?? '—'
+  groupList.value.find(group => group.id === groupId)?.name ?? '—'
 
 // Định dạng giá theo VND (backend trả số dạng string "25000.00")
 const formatPrice = value =>
@@ -129,16 +133,21 @@ const headers = [
   },
 ]
 
-// Xoá sản phẩm qua API thật rồi refetch lại danh sách
+// Xoá sản phẩm: ghi data đi qua store (store tự gọi API và loại bản ghi
+// khỏi state tại chỗ) — bảng server-side vẫn tải lại trang hiện tại vì
+// dữ liệu trang này đọc trực tiếp từ API chứ không qua Pinia.
 const deleteProduct = async id => {
-  await useApi(`/v1/products/${id}`, { method: 'DELETE' }).json()
+  const result = await productStore.removeProduct(id)
+
+  if (!result.ok)
+    return
 
   // Xoá khỏi danh sách đang chọn
   const index = selectedRows.value.findIndex(row => row === id)
   if (index !== -1)
     selectedRows.value.splice(index, 1)
 
-  // Tải lại danh sách sản phẩm
+  // Tải lại danh sách sản phẩm của trang hiện tại (server-side pagination)
   fetchProducts()
 }
 </script>
@@ -180,7 +189,8 @@ const deleteProduct = async id => {
                 clear-icon="tabler-x"
                 class="flex-grow-1"
               />
-              <ProductGroupCreateDialog @created="fetchGroups" />
+              <!-- Store tự prepend nhóm mới sau create (không cần handler) -->
+              <ProductGroupCreateDialog />
             </div>
           </VCol>
         </VRow>
@@ -193,8 +203,8 @@ const deleteProduct = async id => {
           <!-- 👉 Search qua criteria (q) phía server, debounce 500ms -->
           <AppTextField
             v-model="searchQuery"
-            placeholder="Tìm sản phẩm"
-            style="inline-size: 200px;"
+            placeholder="Tìm theo tên, mô tả, giá..."
+            style="inline-size: 240px;"
             class="me-3"
           />
         </div>

@@ -49,6 +49,9 @@ import { VerticalNavLayout } from '@layouts'
     <!-- 👉 Pages -->
     <slot />
 
+    <!-- 👉 Toast thông báo toàn cục (notify(...) từ composable useToasts) -->
+    <AppToasts />
+
     <!-- 👉 Footer -->
     <template #footer>
       <Footer />

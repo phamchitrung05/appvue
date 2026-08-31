@@ -363,6 +363,12 @@
     "whenever": true,
     "validationMessages": true,
     "TABLE_STATUSES": true,
-    "tableStatusMeta": true
+    "tableStatusMeta": true,
+    "useCatalog": true,
+    "isSuccessStatus": true,
+    "parseApiError": true,
+    "dismissToast": true,
+    "notify": true,
+    "useToasts": true
   }
 }

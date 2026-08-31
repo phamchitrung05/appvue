@@ -1,22 +1,40 @@
 <script setup>
-import { useApi } from '@/composables/useApi'
+import { storeToRefs } from 'pinia'
+import { useDiningTableStore } from '@/store/useDiningTableStore'
+import { useTableZoneStore } from '@/store/useTableZoneStore'
 import { TABLE_STATUSES, tableStatusMeta } from '@/utils/tableStatuses'
 
+// ==================== Màn hình Thu Ngân (sơ đồ bàn ăn) ====================
+// tableZoneStore và diningTableStore là nguồn dữ liệu duy nhất cho khu vực
+// và bàn. Không gọi endpoint floor — mọi danh sách/lọc đều dùng state Pinia.
 const router = useRouter()
 
-// ==================== Sơ đồ bàn ăn (Order/List) ====================
-// Toàn bộ khu + bàn lấy từ API thật GET /v1/dining-tables/floor — khu lấy
-// từ bảng table_zones, mỗi bàn là một record của dining_table, trạng thái
-// chỉ có 2 giá trị (trống / có khách — xem utils/tableStatuses.js), thời
-// gian và tổng tiền do backend suy ra từ phiên bàn + đơn hàng.
-const {
-  data: floorData,
-  execute: fetchFloor,
-  isFetching: floorLoading,
-} = await useApi('/v1/dining-tables/floor')
+const tableZoneStore = useTableZoneStore()
+const diningTableStore = useDiningTableStore()
 
-const zones = computed(() => floorData.value?.zones ?? [])
-const totalTables = computed(() => zones.value.reduce((count, zone) => count + zone.tables.length, 0))
+const { tableZones } = storeToRefs(tableZoneStore)
+const { diningTables } = storeToRefs(diningTableStore)
+
+// Store tự quyết định có cần gọi API hay không (chỉ tải lần đầu); quay lại
+// trang thì dùng ngay cache trong Pinia, không phát sinh request.
+await Promise.all([
+  tableZoneStore.ensureLoaded(),
+  diningTableStore.ensureLoaded(),
+])
+
+// Gom dining_table theo zone_id từ Pinia để tạo sơ đồ bàn theo từng khu vực.
+// Trạng thái bàn đọc trực tiếp cột status của resource (mặc định 'available'
+// nếu bản ghi chưa có giá trị).
+const zones = computed(() => tableZones.value.map(zone => ({
+  ...zone,
+  tables: diningTables.value
+    .filter(table => table.zone_id === zone.id)
+    .map(table => ({ ...table, status: table.status ?? 'available' })),
+})))
+
+const totalTables = computed(() => diningTables.value.length)
+
+const isLoading = computed(() => tableZoneStore.isLoading || diningTableStore.isLoading)
 
 // ==================== Bộ lọc khu vực & tìm bàn ====================
 // selectedZoneId: id khu (table_zones.id) hoặc 'all' để xem mọi khu —
@@ -58,42 +76,49 @@ const filteredZones = computed(() => {
 })
 
 // ==================== Trạng thái bàn ====================
-// Nhãn + màu đọc từ file config utils/tableStatuses.js — chỉ 2 trạng thái:
-// "Có khách" dùng màu PRIMARY của hệ thống (đổi primary trong Theme
-// Customizer là màu thẻ bàn tự đổi theo).
+// Trạng thái đọc từ cột status của dining_table ('available'/'occupied'),
+// map nhãn + màu qua tableStatuses.js.
 const statusMeta = table => tableStatusMeta(table.status)
 
 // Định dạng tiền theo kiểu rút gọn Việt Nam: 350000 → "350.000đ"
 const formatMoney = value =>
   `${new Intl.NumberFormat('vi-VN').format(value ?? 0)}đ`
 
-// Cập nhật mỗi 30s để đồng hồ đếm thời gian ngồi của các bàn không bị đứng.
-const now = useNow({ interval: 30000 })
-
-// Cột thời gian trên thẻ bàn:
-// - Trống: '--:--'
-// - Có khách: thời gian đã ngồi tính từ start_time của phiên (HH:MM)
-const formatTableTime = table => {
-  if (table.status === 'occupied' && table.started_at) {
-    const elapsedMinutes = Math.max(0, Math.floor((now.value - new Date(table.started_at)) / 60000))
-    const hours = Math.floor(elapsedMinutes / 60)
-    const minutes = elapsedMinutes % 60
-
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
-  }
-
-  return '--:--'
-}
+// CRUD dining_table chưa có thời gian bắt đầu phiên phục vụ, nên cột thời gian
+// tạm hiển thị placeholder thay vì tự suy diễn từ endpoint floor đã loại bỏ.
+const formatTableTime = () => '--:--'
 
 // Icon tiêu đề khu: đoán theo tên phổ biến, mặc định là icon nhà/khu.
 const zoneIcon = zone => /ngoài trời|ngoai troi|sân|san/i.test(zone.name) ? 'tabler-umbrella' : 'tabler-home'
 
 const legend = Object.values(TABLE_STATUSES).map(meta => ({ label: meta.label, color: meta.color }))
+
+/**
+ * Bàn vừa tạo qua dialog: store đã tự chèn vào ĐẦU state (createDiningTable
+ * chạy prependRecord) — zones computed tự hiện thêm thẻ trong khu tương ứng,
+ * handler không chạm state nữa.
+ *
+ * @returns {void}
+ */
+const onTableCreated = () => {}
+
+/**
+ * Tải lại state Pinia của khu vực và bàn ăn (refresh luôn gọi API bất kể
+ * cache còn hay không — dùng cho nút "Tải lại" trên toolbar).
+ *
+ * @returns {Promise<void>}
+ */
+const refreshData = async () => {
+  await Promise.all([
+    tableZoneStore.refresh(),
+    diningTableStore.refresh(),
+  ])
+}
 </script>
 
 <template>
   <div>
-    <VCard :loading="floorLoading">
+    <VCard :loading="isLoading">
       <!-- 👉 Thanh lọc khu vực + tìm bàn (nằm chung 1 card với sơ đồ) -->
       <VCardText class="pb-4">
         <div class="d-flex flex-wrap align-center gap-4">
@@ -111,7 +136,7 @@ const legend = Object.values(TABLE_STATUSES).map(meta => ({ label: meta.label, c
             <DiningTableCreateDialog
               :zones="zones"
               :zone-id="selectedZoneId"
-              @created="fetchFloor"
+              @created="onTableCreated"
             />
 
             <!-- 👉 Thêm khu vực mới: chuyển sang trang add-area -->
@@ -143,8 +168,8 @@ const legend = Object.values(TABLE_STATUSES).map(meta => ({ label: meta.label, c
 
           <!-- Tải lại sơ đồ bàn (trạng thái/thu tiền thay đổi liên tục trong ca) -->
           <IconBtn
-            :loading="floorLoading"
-            @click="fetchFloor"
+            :loading="isLoading"
+            @click="refreshData"
           >
             <VIcon icon="tabler-refresh" />
           </IconBtn>
@@ -189,7 +214,8 @@ const legend = Object.values(TABLE_STATUSES).map(meta => ({ label: meta.label, c
                 variant="tonal"
                 :color="statusMeta(table).color"
                 class="h-100 table-card"
-                @click="router.push(`/apps/ecommerce/order/add?table=${table.id}`)"
+                :class="{ 'table-card--available': table.status === 'available' }"
+                @click="router.push(`/apps/ecommerce/order/details/${table.id}`)"
               >
                 <VCardText class="text-center py-4">
                   <div class="text-h4 font-weight-bold mb-2">
@@ -266,5 +292,10 @@ const legend = Object.values(TABLE_STATUSES).map(meta => ({ label: meta.label, c
 // Bấm vào số bàn để sang màn hình order
 .table-card {
   cursor: pointer;
+}
+
+// Bàn trống dùng nền trắng để dễ phân biệt với các bàn đang phục vụ có màu trạng thái.
+.table-card--available {
+  background-color: #fff !important;
 }
 </style>

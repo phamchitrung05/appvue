@@ -1,4 +1,6 @@
 <script setup>
+import { useProductGroupStore } from '@/store/useProductGroupStore'
+import { useProductStore } from '@/store/useProductStore'
 import { validationMessages } from '@/utils/validationMessages'
 
 const form = ref({
@@ -15,7 +17,6 @@ const form = ref({
 
 const formRef = ref()
 const isSubmitting = ref(false)
-const snackbar = ref({ show: false, message: '', color: 'error' })
 
 const router = useRouter()
 const route = useRoute()
@@ -34,14 +35,15 @@ const priceRules = [
 ]
 
 // ==================== Danh sách nhóm sản phẩm ====================
-// Endpoint thật /v1/product-groups: sau khi useApi bóc envelope, mảng bản
-// ghi nằm ở thuộc tính `data`. Biến thành options { title, value: id }.
-const { data: groupsData, execute: refreshGroups } = await useApi(createUrl('/v1/product-groups', {
-  query: { per_page: 100 },
-}))
+// Đọc từ Pinia store (tự nạp lần đầu qua ensureLoaded) rồi biến thành
+// options { title, value: id } — không gọi API product-groups riêng nữa.
+const productGroupStore = useProductGroupStore()
+const productStore = useProductStore()
+
+await productGroupStore.ensureLoaded()
 
 const productGroups = computed(() =>
-  (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
+  productGroupStore.productGroups.map(group => ({ title: group.name, value: group.id })),
 )
 
 // Chọn nhóm ban đầu: ưu tiên nhóm truyền từ trang danh mục (?group=<id> —
@@ -51,9 +53,9 @@ const hasRequestedGroup = productGroups.value.some(group => group.value === requ
 
 form.value.product_group_id = hasRequestedGroup ? requestedGroupId : productGroups.value[0]?.value ?? null
 
-// Nhóm mới vừa tạo qua dialog: tải lại options và tự chọn nhóm đó luôn
-const onGroupCreated = async group => {
-  await refreshGroups()
+// Nhóm mới vừa tạo qua dialog: store đã tự chèn vào đầu state — handler chỉ
+// chọn luôn nhóm mới cho form
+const onGroupCreated = group => {
   form.value.product_group_id = group?.id ?? form.value.product_group_id
 }
 
@@ -69,9 +71,9 @@ const buildPayload = () => ({
   image_url: form.value.image_url?.trim() || null,
 })
 
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 const submitProduct = async () => {
   const { valid } = await formRef.value.validate()
@@ -81,38 +83,19 @@ const submitProduct = async () => {
 
   isSubmitting.value = true
 
-  // useApi bóc envelope nên response thành công nằm ở `data`; lỗi (4xx/5xx)
-  // nằm ở `error` dạng text — parse ra để lấy message tiếng Việt từ config.
-  const { error, statusCode } = await useApi('/v1/products', {
-    method: 'POST',
-    body: buildPayload(),
-  }).json()
+  // Ghi data đi qua store — store tự gọi API và chèn sản phẩm mới vào đầu
+  // state (không cần refetch khi quay lại danh sách).
+  const result = await productStore.createProduct(buildPayload())
 
   isSubmitting.value = false
 
-  // useApi trả về các REF (giống productsData.value ở trang list) nên phải
-  // đọc .value — so sánh trực tiếp statusCode sẽ luôn false.
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
+  if (result.ok) {
     router.push('/apps/ecommerce/product/list')
 
     return
   }
 
-  let message = validationMessages.product.createFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.product.createFailed)
 }
 </script>
 
@@ -259,14 +242,6 @@ const submitProduct = async () => {
         </VCol>
       </VRow>
     </VForm>
-
-    <VSnackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      location="top"
-    >
-      {{ snackbar.message }}
-    </VSnackbar>
   </div>
 </template>
 

@@ -1,4 +1,6 @@
 <script setup>
+import { useProductGroupStore } from '@/store/useProductGroupStore'
+import { useProductStore } from '@/store/useProductStore'
 import { validationMessages } from '@/utils/validationMessages'
 
 const route = useRoute()
@@ -7,7 +9,6 @@ const router = useRouter()
 // ==================== Dữ liệu form (6 field của Product) ====================
 const isSubmitting = ref(false)
 const formRef = ref()
-const snackbar = ref({ show: false, message: '', color: 'error' })
 
 const form = ref({
   name: '',
@@ -31,12 +32,14 @@ const priceRules = [
 ]
 
 // ==================== Nhóm hàng cho select ====================
-const { data: groupsData } = await useApi(createUrl('/v1/product-groups', {
-  query: { per_page: 100, sortBy: 'name', orderBy: 'asc' },
-}))
+// Đọc từ Pinia store (tự nạp lần đầu qua ensureLoaded) — không gọi API riêng.
+const productGroupStore = useProductGroupStore()
+const productStore = useProductStore()
+
+await productGroupStore.ensureLoaded()
 
 const productGroups = computed(() =>
-  (groupsData.value?.data ?? []).map(group => ({ title: group.name, value: group.id })),
+  productGroupStore.productGroups.map(group => ({ title: group.name, value: group.id })),
 )
 
 // ==================== Tải sản phẩm theo :id ====================
@@ -65,9 +68,9 @@ watch(productData, value => {
   }
 }, { immediate: true })
 
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 // Payload khớp updateRules(): trường rỗng gửi null, price ép về số
 const buildPayload = () => ({
@@ -87,37 +90,20 @@ const submitProduct = async () => {
 
   isSubmitting.value = true
 
-  // statusCode/error là REF (xem ghi chú ở trang thêm sản phẩm)
-  const { error, statusCode } = await useApi(`/v1/products/${productId}`, {
-    method: 'PUT',
-    body: buildPayload(),
-  }).json()
+  // Ghi data đi qua store — store tự gọi API và vá đúng bản ghi trong state.
+  const result = await productStore.updateProduct(productId, buildPayload())
 
   isSubmitting.value = false
 
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
-    // Lưu xong quay về danh sách ngay (danh sách tự refetch khi mount lại —
-    // không dùng snackbar ở đây vì trang edit unmount khi chuyển hướng)
+  if (result.ok) {
+    // Lưu xong quay về danh sách ngay (bản ghi trong Pinia đã được vá theo
+    // id nên danh sách hiển thị giá trị mới, không cần refetch)
     router.push('/apps/ecommerce/product/list')
 
     return
   }
 
-  let message = validationMessages.product.updateFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.product.updateFailed)
 }
 </script>
 
@@ -289,13 +275,5 @@ const submitProduct = async () => {
         </VBtn>
       </div>
     </VForm>
-
-    <VSnackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      location="top"
-    >
-      {{ snackbar.message }}
-    </VSnackbar>
   </div>
 </template>

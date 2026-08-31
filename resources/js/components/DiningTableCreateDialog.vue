@@ -1,10 +1,7 @@
 <script setup>
+import { useDiningTableStore } from '@/store/useDiningTableStore'
 import { validationMessages } from '@/utils/validationMessages'
 
-// Dialog thêm nhanh bàn vào khu trên sơ đồ bàn (Order/List).
-// Trang cha truyền `zones` (danh sách khu từ API floor, có store_id) và
-// `zone-id` (khu đang chọn — "Tất cả" thì mặc định khu đầu tiên).
-// Tạo thành công emit `created` để trang cha tải lại sơ đồ.
 const props = defineProps({
   zones: {
     type: Array,
@@ -18,12 +15,22 @@ const props = defineProps({
 
 const emit = defineEmits(['created'])
 
+// Dialog thêm nhanh bàn vào khu trên sơ đồ bàn (Order/List).
+// Trang cha truyền `zones` (danh sách khu từ Pinia store, có store_id) và
+// `zone-id` (khu đang chọn — "Tất cả" thì mặc định khu đầu tiên).
+// Ghi data đi qua store — store tự gọi API và chèn bàn vào đầu state.
+const diningTableStore = useDiningTableStore()
+
 defineOptions({ inheritAttrs: false })
 
 const isDialogOpen = ref(false)
 const isSubmitting = ref(false)
 const formRef = ref()
-const snackbar = ref({ show: false, message: '', color: 'error' })
+
+// Toast toàn cục: hiện ở góc trên phải qua <AppToasts /> trong layout.
+// notify.success / notify.error giữ nguyên tên kind khi gọi.
+const showSnackbar = message => notify.success(message)
+const showErrorSnackbar = message => notify.error(message)
 
 const form = ref({
   name: '',
@@ -48,10 +55,6 @@ const openDialog = () => {
   isDialogOpen.value = true
 }
 
-const showSnackbar = (message, color = 'error') => {
-  snackbar.value = { show: true, message, color }
-}
-
 const submitTable = async () => {
   const { valid } = await formRef.value.validate()
 
@@ -63,41 +66,23 @@ const submitTable = async () => {
   // store_id lấy theo khu được chọn để dữ liệu nhất quán với cửa hàng
   const zone = props.zones.find(item => item.id === form.value.zone_id)
 
-  // statusCode/error là REF (xem ghi chú ở trang thêm sản phẩm)
-  const { data, error, statusCode } = await useApi('/v1/dining-tables', {
-    method: 'POST',
-    body: {
-      name: form.value.name.trim(),
-      zone_id: form.value.zone_id,
-      store_id: zone?.store_id ?? null,
-    },
-  }).json()
+  const result = await diningTableStore.createDiningTable({
+    name: form.value.name.trim(),
+    zone_id: form.value.zone_id,
+    store_id: zone?.store_id ?? null,
+  })
 
   isSubmitting.value = false
 
-  const isOk = (statusCode.value ?? 0) >= 200 && statusCode.value < 300
-
-  if (isOk) {
+  if (result.ok) {
     isDialogOpen.value = false
-    showSnackbar(validationMessages.diningTable.createSuccess, 'success')
-    emit('created', data.value)
+    showSnackbar(validationMessages.diningTable.createSuccess)
+    emit('created', result.record)
 
     return
   }
 
-  let message = validationMessages.diningTable.createFailed
-
-  try {
-    const body = JSON.parse(error.value)
-
-    if (body?.message)
-      message = body.message
-  }
-  catch {
-    // error không phải JSON (lỗi mạng...) — giữ message mặc định
-  }
-
-  showSnackbar(message)
+  showErrorSnackbar(result.message || validationMessages.diningTable.createFailed)
 }
 </script>
 
@@ -166,12 +151,4 @@ const submitTable = async () => {
       </VForm>
     </VCard>
   </VDialog>
-
-  <VSnackbar
-    v-model="snackbar.show"
-    :color="snackbar.color"
-    location="top"
-  >
-    {{ snackbar.message }}
-  </VSnackbar>
 </template>

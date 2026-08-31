@@ -1,13 +1,33 @@
 <script setup>
 import { animations, place } from '@formkit/drag-and-drop'
 import { useDragAndDrop } from '@formkit/drag-and-drop/vue'
+import { storeToRefs } from 'pinia'
+import { useProductGroupStore } from '@/store/useProductGroupStore'
+import { useProductStore } from '@/store/useProductStore'
 import { validationMessages } from '@/utils/validationMessages'
 
 const selectedGroupId = ref(null) // null → đang xem "Tất cả sản phẩm"
 
-const { data: groupsData, execute: fetchGroups } = await useApi(createUrl('/v1/product-groups', {
-  query: { per_page: 100, sortBy: 'sort_order', orderBy: 'asc' },
-}))
+// ==================== Store Pinia dùng chung ====================
+// productGroupStore giữ toàn bộ danh mục sản phẩm; productStore giữ toàn bộ
+// sản phẩm. Store tự quyết định có cần gọi API hay không qua ensureLoaded
+// (chỉ tải lần đầu); lọc theo danh mục/tìm món là việc của trang, làm client-side.
+const productGroupStore = useProductGroupStore()
+const productStore = useProductStore()
+
+const { productGroups } = storeToRefs(productGroupStore)
+const { products: allProducts } = storeToRefs(productStore)
+
+await Promise.all([
+  productGroupStore.ensureLoaded(),
+  productStore.ensureLoaded(),
+])
+
+// setProductGroups: cập nhật local sau kéo thả (optimistic, không gọi API).
+const { setProductGroups } = productGroupStore
+
+// Cờ tổng hợp dùng cho overlay "Đang tải" của trang.
+const isFetching = computed(() => productGroupStore.isLoading || productStore.isLoading)
 
 // groups là ref do useDragAndDrop quản lý. Plugin `place` giữ hành vi
 // "kéo chỉ hiện vị trí sẽ thả" (highlight), thả hẳn ra mới cập nhật danh
@@ -34,9 +54,9 @@ const sortGroupsForDisplay = list => {
 
 let syncingGroups = false
 
-watch(groupsData, value => {
+watch(productGroups, value => {
   syncingGroups = true
-  groups.value = sortGroupsForDisplay(value?.data ?? [])
+  groups.value = sortGroupsForDisplay(value ?? [])
   nextTick(() => {
     syncingGroups = false
   })
@@ -46,13 +66,16 @@ const selectGroup = groupId => {
   selectedGroupId.value = groupId
 }
 
-// Nhóm mới tạo từ header "Danh mục": đưa xuống cuối danh sách, gán
-// sort_order = tổng số nhóm rồi chọn luôn nhóm đó
+// Nhóm mới tạo từ header "Danh mục": store đã tự chèn bản ghi vào ĐẦU state
+// (createProductGroup chạy prependRecord), handler chỉ đưa nhóm xuống cuối
+// danh sách hiển thị, gán sort_order rồi chọn luôn nhóm đó
 const onGroupCreated = async group => {
-  await fetchGroups()
-
   if (group?.id === undefined || group?.id === null)
     return
+
+  // Đợi watcher đồng bộ danh sách kéo-thả từ store (store đã tự prepend
+  // ngay sau create, watcher cần 1 tick để phản ánh vào groups.value).
+  await nextTick()
 
   const index = groups.value.findIndex(item => item.id === group.id)
 
@@ -62,10 +85,10 @@ const onGroupCreated = async group => {
     created.sort_order = groups.value.length + 1
     groups.value.push(created)
 
-    await useApi(`/v1/product-groups/${group.id}`, {
-      method: 'PUT',
-      body: { sort_order: created.sort_order },
-    }).json()
+    // Cập nhật qua store — store tự vá bản ghi trong state theo id
+    await productGroupStore.updateProductGroup(group.id, {
+      sort_order: created.sort_order,
+    })
   }
 
   selectedGroupId.value = group.id
@@ -78,22 +101,17 @@ const openEdit = group => {
   editingGroup.value = group
 }
 
-// Phản ánh bản ghi vừa lưu vào danh sách đang hiển thị
-const onGroupSaved = updated => {
-  const local = groups.value.find(item => item.id === updated?.id)
-
-  if (local) {
-    local.name = updated.name
-    local.is_active = updated.is_active
-  }
-}
+// Store đã tự vá bản ghi theo id khi update (applyRecord trong
+// updateProductGroup) — handler ở đây chỉ nhận sự kiện để trang cha
+// làm tiếp nếu cần, không chạm state nữa.
+const onGroupSaved = () => {}
 
 // ==================== Kéo thả: lưu thứ tự vào DB ====================
 const isSavingOrder = ref(false)
-const snackbar = ref({ show: false, message: '', color: 'error' })
 
 // useDragAndDrop tự cập nhật thứ tự groups.value khi kéo — sau khi thay đổi
-// ổn định (debounce) thì gán sort_order 1..n và PUT các nhóm đổi chỗ
+// ổn định (debounce) thì gán sort_order 1..n và PUT các nhóm đổi chỗ qua
+// store (mỗi request trả về bản ghi — store tự vá state theo id)
 const persistOrder = async () => {
   if (syncingGroups)
     return
@@ -106,10 +124,7 @@ const persistOrder = async () => {
     if (group.sort_order !== nextOrder) {
       group.sort_order = nextOrder
       requests.push(
-        useApi(`/v1/product-groups/${group.id}`, {
-          method: 'PUT',
-          body: { sort_order: nextOrder },
-        }).json(),
+        productGroupStore.updateProductGroup(group.id, { sort_order: nextOrder }),
       )
     }
   })
@@ -118,7 +133,8 @@ const persistOrder = async () => {
     isSavingOrder.value = true
     await Promise.all(requests)
     isSavingOrder.value = false
-    snackbar.value = { show: true, message: validationMessages.productGroup.orderSaved, color: 'success' }
+    setProductGroups([...groups.value])
+    notify.success(validationMessages.productGroup.orderSaved)
   }
 }
 
@@ -135,19 +151,15 @@ const selectedGroupName = computed(() => {
   return groups.value.find(group => group.id === selectedGroupId.value)?.name ?? 'Nhóm hàng'
 })
 
-// ==================== Đếm sản phẩm theo nhóm ====================
-// Lấy TẤT CẢ sản phẩm (per_page=-1 — backend bù bằng tổng số bản ghi) rồi
-// đếm client-side; khi catalog lớn nên thay bằng endpoint đếm riêng.
-const { data: allProductsData, execute: fetchAllProducts } = await useApi(createUrl('/v1/products', {
-  query: { per_page: -1 },
-}))
-
-const totalAllProducts = computed(() => allProductsData.value?.total ?? 0)
+// ==================== Đếm sản phẩm theo nhóm từ Pinia ====================
+// allProducts là state của useProductStore; mọi bộ đếm/danh sách phía dưới đều
+// derive bằng computed để UI tự cập nhật khi store thay đổi.
+const totalAllProducts = computed(() => allProducts.value.length)
 
 const countByGroup = computed(() => {
   const counts = {}
 
-  for (const product of (allProductsData.value?.products ?? []))
+  for (const product of allProducts.value)
     counts[product.product_group_id] = (counts[product.product_group_id] ?? 0) + 1
 
   return counts
@@ -158,41 +170,36 @@ const page = ref(1)
 const perPage = 12
 const searchQuery = ref('')
 
-// Debounce ô search: search sản phẩm NẰM TRONG nhóm đang chọn (tham số q)
+// Debounce ô search: tìm sản phẩm trong danh sách Pinia của nhóm đang chọn.
 const debouncedSearchQuery = refDebounced(searchQuery, 400)
 
-// Đổi từ khoá hoặc đổi nhóm → quay về trang 1 (watch đặt TRƯỚC useApi
-// để watcher refetch đọc giá trị page đã cập nhật, tránh gọi API 2 lần)
+// Đổi từ khoá hoặc đổi nhóm → quay về trang 1 để người dùng luôn thấy kết quả
+// đầu tiên của danh mục/bộ lọc mới.
 watch([debouncedSearchQuery, selectedGroupId], () => {
   page.value = 1
 })
 
-const productsQuery = computed(() => {
-  const query = {
-    page: page.value,
-    per_page: perPage,
-  }
+const filteredProducts = computed(() => {
+  const keyword = debouncedSearchQuery.value.trim().toLowerCase()
 
-  if (debouncedSearchQuery.value)
-    query.q = debouncedSearchQuery.value
+  return allProducts.value.filter(product => {
+    const matchGroup = selectedGroupId.value === null || selectedGroupId.value === undefined || product.product_group_id === selectedGroupId.value
+    const matchKeyword = !keyword || product.name.toLowerCase().includes(keyword)
 
-  if (selectedGroupId.value !== null && selectedGroupId.value !== undefined)
-    query.product_group_id = selectedGroupId.value
-
-  return query
+    return matchGroup && matchKeyword
+  })
 })
 
-const {
-  data: productsData,
-  isFetching,
-  execute: fetchGridProducts,
-} = await useApi(createUrl('/v1/products', {
-  query: productsQuery,
-}))
+const totalGridProducts = computed(() => filteredProducts.value.length)
+const lastPage = computed(() => Math.max(1, Math.ceil(totalGridProducts.value / perPage)))
 
-const products = computed(() => productsData.value?.products ?? [])
-const totalGridProducts = computed(() => productsData.value?.total ?? 0)
-const lastPage = computed(() => productsData.value?.lastPage ?? 1)
+// products là danh sách đã phân trang từ state Pinia, giữ nguyên tên biến để
+// template hiện tại không cần đổi cấu trúc hiển thị card sản phẩm.
+const products = computed(() => {
+  const startIndex = (page.value - 1) * perPage
+
+  return filteredProducts.value.slice(startIndex, startIndex + perPage)
+})
 
 const headerCount = computed(() => {
   if (selectedGroupId.value === null)
@@ -213,10 +220,10 @@ const emptyMessage = computed(() => {
 const formatPrice = value =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value)
 
-// Sản phẩm mới tạo từ dialog "Thêm mới": tải lại lưới + bộ đếm theo nhóm
-const onProductCreated = async () => {
-  await Promise.all([fetchGridProducts(), fetchAllProducts()])
-}
+// Sản phẩm mới tạo từ dialog "Thêm mới": store đã tự chèn vào ĐẦU state
+// (createProduct chạy prependRecord) — lưới + bộ đếm theo nhóm tự cập nhật
+// qua computed, không chạm state ở đây nữa.
+const onProductCreated = () => {}
 </script>
 
 <template>
@@ -227,12 +234,12 @@ const onProductCreated = async () => {
       md="4"
     >
       <VCard>
-        <VCardText>
+        <VCardText class="pa-0">
           <!-- 👉 Header "Danh mục": cả hàng là nút — bấm mở dialog thêm nhóm mới -->
           <ProductGroupCreateDialog @created="onGroupCreated">
             <template #activator="{ open }">
               <div
-                class="d-flex align-center justify-space-between mb-3 cursor-pointer"
+                class="d-flex align-center justify-space-between px-6 pt-6 pb-3 cursor-pointer"
                 role="button"
                 tabindex="0"
                 @click="open"
@@ -255,8 +262,8 @@ const onProductCreated = async () => {
             class="py-0"
           >
             <VListItem
-              rounded="lg"
-              class="mb-2 category-item"
+              rounded="0"
+              class="category-item"
               style="min-block-size: 52px;"
               :active="selectedGroupId === null"
               @click="selectGroup(null)"
@@ -285,8 +292,8 @@ const onProductCreated = async () => {
               <VListItem
                 v-for="group in groups"
                 :key="group.id"
-                rounded="lg"
-                class="mb-2 group-item category-item"
+                rounded="0"
+                class="group-item category-item"
                 style="min-block-size: 52px;"
                 :active="selectedGroupId === group.id"
                 @click="selectGroup(group.id)"
@@ -436,14 +443,6 @@ const onProductCreated = async () => {
       </VCard>
     </VCol>
   </VRow>
-
-  <VSnackbar
-    v-model="snackbar.show"
-    :color="snackbar.color"
-    location="top"
-  >
-    {{ snackbar.message }}
-  </VSnackbar>
 </template>
 
 <style lang="scss" scoped>
